@@ -1,0 +1,110 @@
+{
+  "version": "1.0",
+  "servers": [
+    {
+      "name": "ndiag-database-server",
+      "displayName": "Neglected Diagnostics Database Server",
+      "description": "Unified access to biological databases (NCBI, BOLD, SILVA, UNITE, SRA) for sequence retrieval and analysis",
+      "image": "ndiag-database-server:latest",
+      "command": ["python", "database_mcp_server.py"],
+      "protocol": "stdio",
+      "capabilities": ["tools", "logging"],
+      "categories": ["biology", "genomics", "database", "bioinformatics"],
+      "environment": {
+        "PYTHONUNBUFFERED": "1",
+        "MCP_SERVER_NAME": "ndiag-database-server",
+        "LOG_LEVEL": "INFO"
+      },
+      "volumes": [
+        {
+          "type": "bind",
+          "source": "./temp",
+          "target": "/tmp/mcp_cache"
+        }
+      ],
+      "configuration": {
+        "optional": {
+          "NCBI_API_KEY": {
+            "type": "string",
+            "description": "NCBI API key for higher rate limits",
+            "sensitive": true
+          },
+          "GOOGLE_APPLICATION_CREDENTIALS": {
+            "type": "string", 
+            "description": "Path to Google Cloud credentials file for BigQuery access"
+          },
+          "AWS_ACCESS_KEY_ID": {
+            "type": "string",
+            "description": "AWS access key for Athena access",
+            "sensitive": true
+          },
+          "AWS_SECRET_ACCESS_KEY": {
+            "type": "string",
+            "description": "AWS secret key for Athena access", 
+            "sensitive": true
+          },
+          "MAX_RESULTS_LIMIT": {
+            "type": "integer",
+            "description": "Maximum number of results to return",
+            "default": 10000
+          }
+        }
+      },
+      "tools": [
+        {
+          "name": "get_sequences",
+          "description": "Retrieve sequences from multiple biological databases",
+          "examples": [
+            {
+              "description": "Get COI sequences for salmon from Ensembl",
+              "arguments": {
+                "taxon": "Salmo salar",
+                "region": "COI", 
+                "source": "gget",
+                "max_results": 10
+              }
+            }
+          ]
+        },
+        {
+          "name": "gget_search",
+          "description": "Search for genes in Ensembl database",
+          "examples": [
+            {
+              "description": "Search for cytochrome oxidase genes in human",
+              "arguments": {
+                "searchwords": ["COI", "cytochrome oxidase"],
+                "species": "homo_sapiens"
+              }
+            }
+          ]
+        },
+        {
+          "name": "search_sra_studies",
+          "description": "Search SRA studies and BioProjects",
+          "examples": [
+            {
+              "description": "Find salmon COI amplicon studies",
+              "arguments": {
+                "query": "Salmo salar COI",
+                "filters": {
+                  "library_strategy": "AMPLICON",
+                  "max_results": 20
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "documentation": {
+        "readme": "/app/README.md",
+        "examples": "/app/examples/",
+        "api_docs": "Built-in MCP tool descriptions"
+      },
+      "health": {
+        "check": "MCP protocol initialization",
+        "timeout": 30
+      }
+    }
+  ]
+}

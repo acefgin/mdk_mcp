@@ -1,0 +1,133 @@
+{
+  "name": "ndiag-database-server",
+  "version": "1.0.0",
+  "description": "Database MCP Server for neglected-diagnostics project - provides unified access to biological databases including NCBI, BOLD, SILVA, UNITE, and SRA/BioProject data",
+  "author": "neglected-diagnostics team",
+  "license": "MIT",
+  "homepage": "https://github.com/neglected-diagnostics",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/neglected-diagnostics"
+  },
+  "capabilities": {
+    "tools": true,
+    "resources": false,
+    "prompts": false,
+    "logging": true
+  },
+  "tools": [
+    {
+      "name": "get_sequences",
+      "description": "Retrieve sequences from multiple biological databases (NCBI, BOLD, SILVA, UNITE)",
+      "category": "database"
+    },
+    {
+      "name": "gget_ref",
+      "description": "Get reference genome information from Ensembl database",
+      "category": "genomics"
+    },
+    {
+      "name": "gget_search",
+      "description": "Search for genes in Ensembl database using keywords",
+      "category": "genomics"
+    },
+    {
+      "name": "gget_info",
+      "description": "Get detailed information about Ensembl gene/transcript IDs",
+      "category": "genomics"
+    },
+    {
+      "name": "gget_seq",
+      "description": "Retrieve sequences from Ensembl using gene/transcript IDs",
+      "category": "genomics"
+    },
+    {
+      "name": "get_neighbors",
+      "description": "Find taxonomic neighbors for a given organism",
+      "category": "taxonomy"
+    },
+    {
+      "name": "get_taxonomy",
+      "description": "Get detailed taxonomic information for organisms",
+      "category": "taxonomy"
+    },
+    {
+      "name": "search_sra_studies",
+      "description": "Search SRA studies and BioProjects for sequencing data",
+      "category": "database"
+    },
+    {
+      "name": "get_sra_runinfo",
+      "description": "Get detailed run information for SRA studies",
+      "category": "database"
+    },
+    {
+      "name": "search_sra_cloud",
+      "description": "Search SRA using cloud SQL (BigQuery/Athena) for large-scale queries",
+      "category": "database"
+    }
+  ],
+  "docker": {
+    "image": "ndiag-database-server:latest",
+    "command": ["python", "database_mcp_server.py"],
+    "environment": {
+      "MCP_SERVER_NAME": "ndiag-database-server",
+      "PYTHONUNBUFFERED": "1"
+    },
+    "ports": [],
+    "volumes": [
+      {
+        "host": "./temp",
+        "container": "/tmp/mcp_cache",
+        "type": "bind"
+      }
+    ]
+  },
+  "configuration": {
+    "environment_variables": {
+      "NCBI_API_KEY": {
+        "description": "NCBI API key for higher rate limits (optional)",
+        "required": false,
+        "type": "string"
+      },
+      "GOOGLE_APPLICATION_CREDENTIALS": {
+        "description": "Path to Google Cloud credentials for BigQuery access (optional)",
+        "required": false,
+        "type": "string"
+      },
+      "AWS_ACCESS_KEY_ID": {
+        "description": "AWS access key for Athena access (optional)",
+        "required": false,
+        "type": "string"
+      },
+      "AWS_SECRET_ACCESS_KEY": {
+        "description": "AWS secret key for Athena access (optional)",
+        "required": false,
+        "type": "string"
+      },
+      "LOG_LEVEL": {
+        "description": "Logging level (DEBUG, INFO, WARNING, ERROR)",
+        "required": false,
+        "type": "string",
+        "default": "INFO"
+      },
+      "MAX_RESULTS_LIMIT": {
+        "description": "Maximum number of results to return from database queries",
+        "required": false,
+        "type": "integer",
+        "default": 10000
+      }
+    }
+  },
+  "tags": [
+    "biology",
+    "genomics",
+    "database",
+    "ncbi",
+    "ensembl",
+    "sra",
+    "taxonomy",
+    "sequences",
+    "bioinformatics"
+  ]
+}

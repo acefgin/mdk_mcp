@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  ndiag-database-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ndiag-database-server
+    ports:
+      - "8000:8000"
+    environment:
+      - MCP_SERVER_HOST=0.0.0.0
+      - MCP_SERVER_PORT=8000
+      - LOG_LEVEL=INFO
+      - TEMP_DIR=/tmp/mcp_cache
+      - MAX_REQUESTS_PER_MINUTE=60
+      - MAX_RESULTS_DEFAULT=100
+      - MAX_RESULTS_LIMIT=10000
+      # API Keys (set these in .env file or environment)
+      - NCBI_API_KEY=${NCBI_API_KEY:-}
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+    volumes:
+      # Mount for temporary files
+      - ./temp:/tmp/mcp_cache
+      # Mount for Google Cloud credentials if using local file
+      - ${GOOGLE_APPLICATION_CREDENTIALS:-/dev/null}:/app/gcp-key.json:ro
+    # MCP servers use stdio transport, no HTTP health check needed
+    restart: unless-stopped
+    networks:
+      - ndiag-network
+
+  # Test client service for development
+  test-client:
+    image: python:3.11-slim
+    container_name: ndiag-test-client
+    depends_on:
+      - ndiag-database-server
+    volumes:
+      - ./tests:/app/tests
+    working_dir: /app
+    command: >
+      sh -c "
+        pip install requests httpx pytest &&
+        echo 'Waiting for database server to start...' &&
+        sleep 30 &&
+        python -c 'import requests; print(requests.get(\"http://ndiag-database-server:8000/health\").text)' &&
+        echo 'Database server is ready for testing!'
+      "
+    networks:
+      - ndiag-network
+    profiles:
+      - testing
+
+networks:
+  ndiag-network:
+    driver: bridge
+
+volumes:
+  temp_cache:
+    driver: local
