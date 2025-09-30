@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ndiag-qpcr
+  labels:
+    app: ndiag
+    component: qpcr-assistant

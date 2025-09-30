@@ -1,0 +1,27 @@
+# AutoGen qPCR Assistant Requirements
+
+# AutoGen framework
+pyautogen>=0.2.0
+
+# LLM providers
+openai>=1.0.0
+
+# Async support
+asyncio-mqtt>=0.16.0
+
+# Data handling
+pandas>=2.0.0
+biopython>=1.81
+numpy>=1.24.0
+
+# UI (optional)
+streamlit>=1.28.0
+plotly>=5.17.0
+
+# Logging
+structlog>=23.0.0
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.11.0

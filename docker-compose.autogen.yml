@@ -1,0 +1,110 @@
+version: '3.8'
+
+# Docker Compose configuration for AutoGen + MCP Multi-Agent System
+# This orchestrates MCP servers and AutoGen agents for qPCR assay design
+
+services:
+  # ========================================
+  # MCP Servers (Bioinformatics Tools)
+  # ========================================
+
+  # Phase 1: Database MCP Server
+  database-server:
+    build: ./mcp_servers/database_server
+    container_name: ndiag-database-server
+    stdin_open: true  # Required for MCP stdio protocol
+    tty: false
+    networks:
+      - ndiag-network
+    environment:
+      - NCBI_API_KEY=${NCBI_API_KEY:-}
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - TEMP_DIR=/tmp/mcp_cache
+    volumes:
+      - database_cache:/tmp/mcp_cache
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ps", "aux", "|", "grep", "database_mcp_server"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Phase 2: Processing MCP Server (when implemented)
+  # processing-server:
+  #   build: ./mcp_servers/processing_server
+  #   container_name: ndiag-processing-server
+  #   stdin_open: true
+  #   networks:
+  #     - ndiag-network
+  #   restart: unless-stopped
+
+  # Phase 3: Alignment MCP Server (when implemented)
+  # alignment-server:
+  #   build: ./mcp_servers/alignment_server
+  #   container_name: ndiag-alignment-server
+  #   stdin_open: true
+  #   networks:
+  #     - ndiag-network
+  #   restart: unless-stopped
+
+  # Phase 4: Design MCP Server (when implemented)
+  # design-server:
+  #   build: ./mcp_servers/design_server
+  #   container_name: ndiag-design-server
+  #   stdin_open: true
+  #   networks:
+  #     - ndiag-network
+  #   restart: unless-stopped
+
+  # ========================================
+  # AutoGen Application
+  # ========================================
+
+  qpcr-assistant:
+    build: ./autogen_app
+    container_name: qpcr-assistant
+    depends_on:
+      - database-server
+    networks:
+      - ndiag-network
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - MCP_DATABASE_SERVER=ndiag-database-server
+      - NCBI_API_KEY=${NCBI_API_KEY:-}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - AUTOGEN_MAX_ROUNDS=${AUTOGEN_MAX_ROUNDS:-20}
+      - AUTOGEN_TEMPERATURE=${AUTOGEN_TEMPERATURE:-0.7}
+    volumes:
+      - ./autogen_app:/app
+      - ./results:/results  # Persist primer designs and reports
+      - /var/run/docker.sock:/var/run/docker.sock  # Access to Docker for MCP communication
+    ports:
+      - "8501:8501"  # Streamlit UI (if enabled)
+    restart: unless-stopped
+    command: python qpcr_assistant.py
+
+  # Optional: Streamlit UI for qPCR Assistant
+  # qpcr-ui:
+  #   build: ./autogen_app
+  #   container_name: qpcr-ui
+  #   depends_on:
+  #     - qpcr-assistant
+  #   networks:
+  #     - ndiag-network
+  #   environment:
+  #     - OPENAI_API_KEY=${OPENAI_API_KEY}
+  #   ports:
+  #     - "8501:8501"
+  #   command: streamlit run streamlit_app.py
+
+networks:
+  ndiag-network:
+    driver: bridge
+    name: ndiag-network
+
+volumes:
+  database_cache:
+    driver: local
+  results:
+    driver: local

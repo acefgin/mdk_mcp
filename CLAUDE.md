@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is **mdk_mcp** (Neglected Diagnostics MCP), an MCP-based system for biological sequence analysis and primer design. The project uses the Model Context Protocol (MCP) to expose bioinformatics capabilities as distributed services that can be orchestrated by AI assistants for natural language-driven diagnostic tool development.
 
+**Primary Use Case**: Multi-agent AutoGen system for qPCR assay design. The MCP servers provide bioinformatics tools that AutoGen agents use to help scientists design species-specific qPCR primers for molecular diagnostics.
+
 ## Architecture
 
 **MCP Server Architecture**: The system is organized into consolidated MCP servers, each handling a major phase of the analysis pipeline:
@@ -22,14 +24,16 @@ This is **mdk_mcp** (Neglected Diagnostics MCP), an MCP-based system for biologi
 ## Key Technologies
 
 - **MCP Framework**: stdio-based protocol for tool exposure
+- **AutoGen**: Multi-agent orchestration framework for AI assistants
 - **gget**: Standardized genomic database access (Ensembl, NCBI, UniProt)
 - **BioPython**: Sequence parsing and manipulation
 - **pysradb**: SRA/BioProject metadata access
 - **Docker**: Containerized MCP servers with isolated dependencies
+- **Kubernetes**: Production orchestration and auto-scaling
 
 ## Development Commands
 
-### Build and Run Database Server
+### Build and Run MCP Servers
 
 ```bash
 cd mcp_servers/database_server
@@ -42,6 +46,20 @@ docker-compose up --build
 
 # Run standalone container
 docker run -d --name ndiag-database-server -i ndiag-database-server:latest
+```
+
+### Build and Run AutoGen qPCR Assistant
+
+```bash
+# Complete system with AutoGen + MCP servers
+docker-compose -f docker-compose.autogen.yml up --build
+
+# Or just build
+docker-compose -f docker-compose.autogen.yml build
+
+# Run tests
+cd autogen_app
+pytest tests/
 ```
 
 ### Testing
@@ -181,9 +199,42 @@ Detailed implementation actions for Phases 1-2 are in `phase1-2-actions.md`.
 
 See `mcp_servers/database_server/requirements.txt` for full dependency list.
 
+## AutoGen Integration
+
+The MCP servers are designed to be used by AutoGen agents. See `AUTOGEN_INTEGRATION.md` for complete details.
+
+**Key Files**:
+- `autogen_app/autogen_mcp_bridge.py` - Bridge between AutoGen and MCP servers
+- `autogen_app/qpcr_assistant.py` - Multi-agent qPCR design system
+- `docker-compose.autogen.yml` - Complete deployment with AutoGen
+- `kubernetes/` - Production Kubernetes manifests
+
+**Quick Example**:
+```python
+from autogen_mcp_bridge import MCPClientBridge
+
+# Initialize bridge
+bridge = MCPClientBridge({"database": {"container": "ndiag-database-server", ...}})
+await bridge.start_servers()
+
+# Call MCP tools from AutoGen agents
+sequences = await bridge.call_tool("database", "get_sequences", {
+    "taxon": "Salmo salar",
+    "region": "COI",
+    "max_results": 100
+})
+```
+
+## Deployment
+
+- **Development**: Use `docker-compose.autogen.yml`
+- **Production**: Use Kubernetes manifests in `kubernetes/`
+- See `DEPLOYMENT.md` for complete deployment guide
+
 ## Known Limitations
 
 - SILVA and UNITE integrations are placeholders (not yet fully implemented)
 - Cloud SQL (BigQuery/Athena) requires additional credentials setup
 - Rate limiting is basic (no distributed rate limiting across instances)
 - No caching layer implemented yet (planned for future)
+- Phases 2-6 MCP servers not yet implemented (only Phase 1 Database complete)
