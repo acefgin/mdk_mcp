@@ -1,0 +1,30 @@
+# AG2 qPCR Assistant Requirements
+
+# AG2 framework (formerly AutoGen)
+# Community-maintained fork with stable architecture
+# Version 0.9.9 as of 2025-10-01
+ag2[gemini,openai]>=0.9.0  # Include both Gemini and OpenAI support
+
+# LLM providers (included via ag2[gemini,openai] but specified for clarity)
+openai>=1.0.0
+google-generativeai>=0.3.0  # Google Gemini support
+
+# Async support
+asyncio-mqtt>=0.16.0
+
+# Data handling
+pandas>=2.0.0
+biopython>=1.81
+numpy>=1.24.0
+
+# UI (optional)
+streamlit>=1.28.0
+plotly>=5.17.0
+
+# Logging
+structlog>=23.0.0
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.11.0

@@ -1,0 +1,145 @@
+---
+# ConfigMap for qPCR Assistant
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: qpcr-assistant-config
+  namespace: ndiag-qpcr
+data:
+  MCP_DATABASE_SERVER: "database-server-0.database-server"
+  LOG_LEVEL: "INFO"
+  AUTOGEN_MAX_ROUNDS: "20"
+  AUTOGEN_TEMPERATURE: "0.7"
+
+---
+# Secret for OpenAI API Key
+apiVersion: v1
+kind: Secret
+metadata:
+  name: qpcr-assistant-secrets
+  namespace: ndiag-qpcr
+type: Opaque
+stringData:
+  OPENAI_API_KEY: ""  # Set this in production
+
+---
+# Deployment for qPCR Assistant
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qpcr-assistant
+  namespace: ndiag-qpcr
+  labels:
+    app: ndiag
+    component: qpcr-assistant
+spec:
+  replicas: 3  # Horizontal scaling
+  selector:
+    matchLabels:
+      app: ndiag
+      component: qpcr-assistant
+  template:
+    metadata:
+      labels:
+        app: ndiag
+        component: qpcr-assistant
+    spec:
+      containers:
+      - name: qpcr-assistant
+        image: qpcr-assistant:latest
+        imagePullPolicy: IfNotPresent
+        envFrom:
+        - configMapRef:
+            name: qpcr-assistant-config
+        - secretRef:
+            name: qpcr-assistant-secrets
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "4000m"
+        volumeMounts:
+        - name: results
+          mountPath: /results
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8501
+          initialDelaySeconds: 60
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8501
+          initialDelaySeconds: 30
+          periodSeconds: 10
+      volumes:
+      - name: results
+        persistentVolumeClaim:
+          claimName: results-pvc
+
+---
+# Service for qPCR Assistant
+apiVersion: v1
+kind: Service
+metadata:
+  name: qpcr-assistant
+  namespace: ndiag-qpcr
+  labels:
+    app: ndiag
+    component: qpcr-assistant
+spec:
+  type: LoadBalancer
+  selector:
+    app: ndiag
+    component: qpcr-assistant
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8501
+    protocol: TCP
+
+---
+# HorizontalPodAutoscaler for qPCR Assistant
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: qpcr-assistant-hpa
+  namespace: ndiag-qpcr
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: qpcr-assistant
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+
+---
+# PersistentVolumeClaim for Results
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: results-pvc
+  namespace: ndiag-qpcr
+spec:
+  accessModes:
+  - ReadWriteMany
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: standard

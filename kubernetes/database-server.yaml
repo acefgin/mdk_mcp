@@ -1,0 +1,110 @@
+---
+# ConfigMap for Database MCP Server
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: database-server-config
+  namespace: ndiag-qpcr
+data:
+  LOG_LEVEL: "INFO"
+  TEMP_DIR: "/tmp/mcp_cache"
+  MAX_RESULTS_LIMIT: "10000"
+
+---
+# Secret for API Keys
+apiVersion: v1
+kind: Secret
+metadata:
+  name: database-server-secrets
+  namespace: ndiag-qpcr
+type: Opaque
+stringData:
+  NCBI_API_KEY: ""  # Set this in production
+  GOOGLE_APPLICATION_CREDENTIALS: ""  # Set this in production
+
+---
+# StatefulSet for Database MCP Server
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: database-server
+  namespace: ndiag-qpcr
+  labels:
+    app: ndiag
+    component: database-server
+spec:
+  serviceName: database-server
+  replicas: 2  # High availability
+  selector:
+    matchLabels:
+      app: ndiag
+      component: database-server
+  template:
+    metadata:
+      labels:
+        app: ndiag
+        component: database-server
+    spec:
+      containers:
+      - name: database-server
+        image: ndiag-database-server:latest
+        imagePullPolicy: IfNotPresent
+        stdin: true
+        tty: false
+        envFrom:
+        - configMapRef:
+            name: database-server-config
+        - secretRef:
+            name: database-server-secrets
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"
+        volumeMounts:
+        - name: cache
+          mountPath: /tmp/mcp_cache
+        livenessProbe:
+          exec:
+            command:
+            - ps
+            - aux
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          exec:
+            command:
+            - ps
+            - aux
+          initialDelaySeconds: 10
+          periodSeconds: 10
+  volumeClaimTemplates:
+  - metadata:
+      name: cache
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 10Gi
+
+---
+# Service for Database MCP Server
+apiVersion: v1
+kind: Service
+metadata:
+  name: database-server
+  namespace: ndiag-qpcr
+  labels:
+    app: ndiag
+    component: database-server
+spec:
+  clusterIP: None  # Headless service for StatefulSet
+  selector:
+    app: ndiag
+    component: database-server
+  ports:
+  - name: mcp
+    port: 8000
+    targetPort: 8000
