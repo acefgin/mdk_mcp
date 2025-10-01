@@ -1,0 +1,25 @@
+{
+  "session_id": "20251001_211620",
+  "start_time": "2025-10-01T21:16:20.158255",
+  "user_request": "\nI need to design a qPCR assay with the following specifications:\n\nTarget Species: Salmo salar\nOff-Target Species: Unsure, want to use this assay at Washington State US, please research proper off-targets\nGenomic Region: COI, or others good genes for choosen target\nApplication: environmental monitoring\nAdditional Requirements: Please target for robust region with good sensitivity\n\nPlease:\n1. Retrieve sequences for the target species\n2. Retrieve sequences for off-target species\n3. Analyze sequences to identify signature regions unique to the target\n4. Recommend primer design strategy considering the application context\n5. Provide a comprehensive report with all findings\n",
+  "agents": [],
+  "tool_calls": [],
+  "messages": [
+    {
+      "timestamp": "2025-10-01T21:16:20.158282",
+      "source": "user",
+      "type": "request",
+      "content": "\nI need to design a qPCR assay with the following specifications:\n\nTarget Species: Salmo salar\nOff-Target Species: Unsure, want to use this assay at Washington State US, please research proper off-targets\nGenomic Region: COI, or others good genes for choosen target\nApplication: environmental monitor"
+    }
+  ],
+  "end_time": "2025-10-01T21:16:20.363546",
+  "summary": "Workflow failed with error: 400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'API_KEY_INVALID', 'domain': 'googleapis.com', 'metadata': {'service': 'generativelanguage.googleapis.com'}}, {'@type': 'type.googleapis.com/google.rpc.LocalizedMessage', 'locale': 'en-US', 'message': 'API key not valid. Please pass a valid API key.'}]}}",
+  "statistics": {
+    "total_agents": 0,
+    "total_actions": 0,
+    "total_tool_calls": 0,
+    "successful_tool_calls": 0,
+    "failed_tool_calls": 0,
+    "total_messages": 1
+  }
+}

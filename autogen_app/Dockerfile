@@ -16,7 +16,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY autogen_mcp_bridge.py .
 COPY qpcr_assistant.py .
-COPY streamlit_app.py .
 
 # Create results directory
 RUN mkdir -p /results
@@ -28,5 +27,6 @@ EXPOSE 8501
 ENV PYTHONUNBUFFERED=1
 ENV MCP_DATABASE_SERVER=ndiag-database-server
 
-# Default command (can be overridden)
-CMD ["python", "qpcr_assistant.py"]
+# Keep container running for interactive access via docker exec
+# Don't auto-start the interactive mode - let user control via start_interactive.sh
+CMD ["tail", "-f", "/dev/null"]

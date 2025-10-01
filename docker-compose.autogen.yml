@@ -64,17 +64,16 @@ services:
   qpcr-assistant:
     build: ./autogen_app
     container_name: qpcr-assistant
+    stdin_open: true  # Enable interactive mode
+    tty: true  # Allocate pseudo-TTY for interactive terminal
     depends_on:
       - database-server
     networks:
       - ndiag-network
+    env_file:
+      - ./autogen_app/.env
     environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - MCP_DATABASE_SERVER=ndiag-database-server
-      - NCBI_API_KEY=${NCBI_API_KEY:-}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - AUTOGEN_MAX_ROUNDS=${AUTOGEN_MAX_ROUNDS:-20}
-      - AUTOGEN_TEMPERATURE=${AUTOGEN_TEMPERATURE:-0.7}
     volumes:
       - ./autogen_app:/app
       - ./results:/results  # Persist primer designs and reports
@@ -82,7 +81,8 @@ services:
     ports:
       - "8501:8501"  # Streamlit UI (if enabled)
     restart: unless-stopped
-    command: python qpcr_assistant.py
+    # Keep container running - interactive mode started via docker exec from start_interactive.sh
+    command: tail -f /dev/null
 
   # Optional: Streamlit UI for qPCR Assistant
   # qpcr-ui:

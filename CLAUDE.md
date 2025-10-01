@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is **mdk_mcp** (Neglected Diagnostics MCP), an MCP-based system for biological sequence analysis and primer design. The project uses the Model Context Protocol (MCP) to expose bioinformatics capabilities as distributed services that can be orchestrated by AI assistants for natural language-driven diagnostic tool development.
 
-**Primary Use Case**: Multi-agent AutoGen system for qPCR assay design. The MCP servers provide bioinformatics tools that AutoGen agents use to help scientists design species-specific qPCR primers for molecular diagnostics.
+**Primary Use Case**: Multi-agent AG2 system for qPCR assay design. The MCP servers provide bioinformatics tools that AG2 agents use to help scientists design species-specific qPCR primers for molecular diagnostics.
 
 ## Architecture
 
@@ -24,7 +24,7 @@ This is **mdk_mcp** (Neglected Diagnostics MCP), an MCP-based system for biologi
 ## Key Technologies
 
 - **MCP Framework**: stdio-based protocol for tool exposure
-- **AutoGen**: Multi-agent orchestration framework for AI assistants
+- **AG2**: Multi-agent orchestration framework for AI assistants (formerly AutoGen)
 - **gget**: Standardized genomic database access (Ensembl, NCBI, UniProt)
 - **BioPython**: Sequence parsing and manipulation
 - **pysradb**: SRA/BioProject metadata access
@@ -48,11 +48,27 @@ docker-compose up --build
 docker run -d --name ndiag-database-server -i ndiag-database-server:latest
 ```
 
-### Build and Run AutoGen qPCR Assistant
+### Build and Run AG2 qPCR Assistant (Interactive Mode)
 
 ```bash
-# Complete system with AutoGen + MCP servers
-docker-compose -f docker-compose.autogen.yml up --build
+# ONE-COMMAND START (RECOMMENDED) - Interactive chat interface
+./start_interactive.sh
+
+# This will:
+# 1. Check API key configuration
+# 2. Build and start containers
+# 3. Launch interactive chat interface
+# 4. Allow natural language interaction with agents
+
+# Or manually:
+docker-compose -f docker-compose.autogen.yml up --build -d
+docker attach qpcr-assistant
+
+# The interactive interface allows you to:
+# - Type qPCR design requests naturally
+# - See real-time agent collaboration
+# - Submit multiple requests in one session
+# - Use commands: help, logs, clear, exit
 
 # Or just build
 docker-compose -f docker-compose.autogen.yml build
@@ -199,14 +215,14 @@ Detailed implementation actions for Phases 1-2 are in `phase1-2-actions.md`.
 
 See `mcp_servers/database_server/requirements.txt` for full dependency list.
 
-## AutoGen Integration
+## AG2 Integration
 
-The MCP servers are designed to be used by AutoGen agents. See `AUTOGEN_INTEGRATION.md` for complete details.
+The MCP servers are designed to be used by AG2 agents. See `docs/AUTOGEN_INTEGRATION.md` for complete details.
 
 **Key Files**:
-- `autogen_app/autogen_mcp_bridge.py` - Bridge between AutoGen and MCP servers
+- `autogen_app/autogen_mcp_bridge.py` - Bridge between AG2 and MCP servers
 - `autogen_app/qpcr_assistant.py` - Multi-agent qPCR design system
-- `docker-compose.autogen.yml` - Complete deployment with AutoGen
+- `docker-compose.autogen.yml` - Complete deployment with AG2
 - `kubernetes/` - Production Kubernetes manifests
 
 **Quick Example**:
@@ -217,7 +233,7 @@ from autogen_mcp_bridge import MCPClientBridge
 bridge = MCPClientBridge({"database": {"container": "ndiag-database-server", ...}})
 await bridge.start_servers()
 
-# Call MCP tools from AutoGen agents
+# Call MCP tools from AG2 agents
 sequences = await bridge.call_tool("database", "get_sequences", {
     "taxon": "Salmo salar",
     "region": "COI",

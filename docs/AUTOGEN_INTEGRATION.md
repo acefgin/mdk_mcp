@@ -1,16 +1,16 @@
-# AutoGen Integration Architecture
+# AG2 Integration Architecture
 
-**Purpose**: Enable MCP servers as tools for AutoGen agents to assist scientists in qPCR assay design for species identification.
+**Purpose**: Enable MCP servers as tools for AG2 agents to assist scientists in qPCR assay design for species identification.
 
 ## Overview
 
-This project provides MCP (Model Context Protocol) servers that expose bioinformatics tools. AutoGen agents will orchestrate these tools to create an intelligent assistant for qPCR assay design.
+This project provides MCP (Model Context Protocol) servers that expose bioinformatics tools. AG2 agents orchestrate these tools to create an intelligent assistant for qPCR assay design.
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    AutoGen Multi-Agent System                │
+│                    AG2 Multi-Agent System                    │
 │                                                               │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
 │  │ Coordinator  │  │   Database   │  │   Designer   │      │
@@ -41,7 +41,7 @@ This project provides MCP (Model Context Protocol) servers that expose bioinform
 └────────────────┘  └─────────────┘  └─────────────────┘
 ```
 
-## AutoGen Agent Roles
+## AG2 Agent Roles
 
 ### 1. Coordinator Agent
 **Role**: Orchestrate workflow, interpret user intent, coordinate other agents
