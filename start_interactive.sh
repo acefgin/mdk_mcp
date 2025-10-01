@@ -58,7 +58,7 @@ if docker ps | grep -q "qpcr-assistant"; then
             docker exec -it qpcr-assistant bash -c "
 stty sane 2>/dev/null || true
 export TERM=xterm-256color
-cd /app && python3 -c 'import asyncio; from qpcr_assistant import interactive_mode; asyncio.run(interactive_mode())'
+cd /app && python3 -c 'from qpcr_assistant import interactive_mode; interactive_mode()'
 "
             exit 0
             ;;
@@ -140,7 +140,7 @@ stty sane 2>/dev/null || true
 export TERM=xterm-256color
 
 # Start interactive mode with Python
-cd /app && python3 -c 'import asyncio; from qpcr_assistant import interactive_mode; asyncio.run(interactive_mode())'
+cd /app && python3 -c 'from qpcr_assistant import interactive_mode; interactive_mode()'
 "
 
 # If user detaches or exits

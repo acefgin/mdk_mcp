@@ -407,20 +407,8 @@ mdk_mcp/
 │
 ├── docs/                               # Documentation
 │   ├── INDEX.md                        # Documentation index and navigation
-│   ├── QUICK_START.md                  # 5-minute getting started guide
-│   ├── INTERACTIVE_MODE.md             # Interactive chat interface guide
 │   ├── USER_GUIDE.md                   # Comprehensive user reference
 │   ├── AUTOGEN_INTEGRATION.md          # AG2 integration architecture
-│   ├── DEPLOYMENT.md                   # Production deployment guide
-│   ├── road_map.md                     # 6-phase development roadmap
-│   └── archive/                        # Historical documentation
-│       ├── INTERACTION_REFERENCE.md    # Quick reference card
-│       ├── INTERACTIVE_QUICK_START.md  # Interactive mode quick start
-│       ├── TASK_LOGGING_SUMMARY.md     # Task logging details
-│       ├── PHASE1_STATUS.md            # Phase 1 status report
-│       ├── TESTING_AUTOGEN.md          # Testing guide
-│       ├── WEEK7_SUMMARY.md            # Week 7 summary
-│       └── phase1-2-actions.md         # Phase 1-2 action items
 │
 ├── kubernetes/                         # Kubernetes manifests
 │   ├── namespace.yaml

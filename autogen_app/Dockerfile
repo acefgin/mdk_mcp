@@ -16,7 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY autogen_mcp_bridge.py .
 COPY qpcr_assistant.py .
-COPY streamlit_app.py .
+COPY OAI_CONFIG_LIST.json .
 
 # Create results directory
 RUN mkdir -p /results
