@@ -15,6 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY autogen_mcp_bridge.py .
+COPY text_resources.py .
 COPY qpcr_assistant.py .
 COPY OAI_CONFIG_LIST.json .
 

@@ -7,7 +7,7 @@ set -e
 
 echo "╔══════════════════════════════════════════════════════════════════════════╗"
 echo "║                                                                          ║"
-echo "║               qPCR ASSISTANT - Interactive Mode Launcher                ║"
+echo "║               qPCR ASSISTANT - Interactive Mode Launcher                 ║"
 echo "║                                                                          ║"
 echo "╚══════════════════════════════════════════════════════════════════════════╝"
 echo ""

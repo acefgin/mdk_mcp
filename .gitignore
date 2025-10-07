@@ -1,1 +1,7 @@
 .env
+results/
+__pycache__/
+mcp_servers/database_server/__pycache__/
+*.md
+!READMD.md
+!CLAUDE.md

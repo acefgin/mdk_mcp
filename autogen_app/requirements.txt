@@ -12,6 +12,9 @@ google-generativeai>=0.3.0  # Google Gemini support
 # Async support
 asyncio-mqtt>=0.16.0
 
+# Environment variables
+python-dotenv>=1.0.0
+
 # Data handling
 pandas>=2.0.0
 biopython>=1.81

@@ -19,13 +19,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def summarize_large_result(result: Any, max_chars: int = 5000) -> str:
+def summarize_large_result(result: Any, max_chars: int = 1000) -> str:
     """
     Summarize large tool results to avoid token limit issues.
+    
+    CRITICAL: For sequence data, return ONLY metadata (count, headers).
+    NEVER return actual sequence content - it will break token budgets.
 
     Args:
         result: Tool result (could be string, dict, list, etc.)
-        max_chars: Maximum characters to include in summary
+        max_chars: Maximum characters to include in summary (default 1000, down from 5000)
 
     Returns:
         Summarized string representation
@@ -47,26 +50,25 @@ def summarize_large_result(result: Any, max_chars: int = 5000) -> str:
         if isinstance(data, dict):
             summary_parts = []
 
-            # Count sequences if FASTA format
+            # Count sequences if FASTA format - ONLY return metadata
             if "sequences" in data or any(key.startswith('>') for key in str(data)[:1000]):
                 # Count sequences in FASTA
                 fasta_count = str(data).count('>')
                 if fasta_count > 0:
                     summary_parts.append(f"Retrieved {fasta_count} sequences")
-                    # Show first 2 sequences as examples
+                    # Show ONLY headers (first 2), NO sequence content
                     lines = str(data).split('\n')
-                    preview_lines = []
-                    seq_count = 0
-                    for line in lines:
+                    headers = []
+                    for line in lines[:30]:  # Only scan first 30 lines
                         if line.startswith('>'):
-                            seq_count += 1
-                            if seq_count > 2:
+                            headers.append(line[:80])  # Truncate long headers
+                            if len(headers) >= 2:
                                 break
-                        if seq_count <= 2:
-                            preview_lines.append(line)
-                    summary_parts.append("\n\nFirst 2 sequences (preview):")
-                    summary_parts.append('\n'.join(preview_lines))
+                    if headers:
+                        summary_parts.append("\n\nSample headers:")
+                        summary_parts.append('\n'.join(headers))
                     summary_parts.append(f"\n... and {fasta_count - 2} more sequences")
+                    summary_parts.append("\n[Sequence data saved to file - do not request full content]")
                     return '\n'.join(summary_parts)
 
             # Handle metadata extractions
@@ -543,6 +545,55 @@ class AutoGenMCPFunctionExecutor:
         import os
         os.makedirs(full_result_dir, exist_ok=True)
 
+    async def _call_mcp_tool_raw(
+        self,
+        function_name: str,
+        arguments: Dict[str, Any]
+    ) -> str:
+        """
+        Call MCP tool and return RAW result without summarization.
+        Used when we need the full data (e.g., for saving sequences to file).
+
+        Args:
+            function_name: Name of the function
+            arguments: Function arguments
+
+        Returns:
+            Full, unsummarized result from MCP server (extracted from JSON wrapper)
+        """
+        function_map = {
+            "get_sequences": ("database", "get_sequences"),
+            "get_taxonomy": ("database", "get_taxonomy"),
+            "get_neighbors": ("database", "get_neighbors"),
+            "extract_sequence_columns": ("database", "extract_sequence_columns"),
+            "search_sra_studies": ("database", "search_sra_studies"),
+        }
+
+        if function_name not in function_map:
+            return f"Error: Unknown function '{function_name}'"
+
+        server, tool = function_map[function_name]
+
+        try:
+            result = await self.bridge.call_tool(server, tool, arguments)
+            
+            # Extract actual content from MCP response
+            # MCP returns: {'content': [{'type': 'text', 'text': 'ACTUAL DATA'}], 'isError': False}
+            if isinstance(result, dict):
+                if 'content' in result:
+                    content_list = result['content']
+                    if isinstance(content_list, list) and len(content_list) > 0:
+                        first_content = content_list[0]
+                        if isinstance(first_content, dict) and 'text' in first_content:
+                            # Return the pure text content
+                            return first_content['text']
+                # Fallback if structure is different
+                return str(result)
+            return str(result)
+        except Exception as e:
+            logger.error(f"Raw MCP call failed: {e}")
+            return f"Error: {str(e)}"
+
     async def execute_function(
         self,
         function_name: str,
@@ -581,22 +632,54 @@ class AutoGenMCPFunctionExecutor:
             result_filename = f"tool_result_{function_name}_{timestamp}.txt"
             result_path = f"{self.full_result_dir}/{result_filename}"
 
+            # Save both raw MCP response and extracted content
             with open(result_path, 'w') as f:
                 f.write(f"Tool: {function_name}\n")
                 f.write(f"Arguments: {json.dumps(arguments, indent=2)}\n")
                 f.write(f"Timestamp: {datetime.now().isoformat()}\n")
                 f.write("=" * 80 + "\n\n")
+                
+                # Save raw MCP response
+                f.write("RAW MCP RESPONSE:\n")
+                f.write("-" * 80 + "\n")
                 f.write(str(result))
+                f.write("\n\n")
+                
+                # Extract and save clean content
+                f.write("EXTRACTED CONTENT:\n")
+                f.write("-" * 80 + "\n")
+                
+                # Try to extract the 'text' field from MCP wrapper
+                extracted_content = None
+                if isinstance(result, dict):
+                    if 'content' in result:
+                        content_list = result['content']
+                        if isinstance(content_list, list) and len(content_list) > 0:
+                            first_content = content_list[0]
+                            if isinstance(first_content, dict) and 'text' in first_content:
+                                extracted_content = first_content['text']
+                
+                if extracted_content:
+                    f.write(extracted_content)
+                else:
+                    f.write("(Could not extract - using raw result)")
+                    f.write("\n")
+                    f.write(str(result))
 
             # Summarize large results to avoid token limits
             # Full results are saved in the file above
-            summarized = summarize_large_result(result, max_chars=5000)
+            # Use 1000 chars max (reduced from 5000) to prevent token budget issues
+            summarized = summarize_large_result(result, max_chars=1000)
 
             # Add reference to full result file in summary
-            if len(str(result)) > 5000:
+            if len(str(result)) > 1000:
                 summarized += f"\n\n[Full result saved to: {result_filename}]"
 
-            logger.info(f"Function {function_name} result: {len(str(result))} chars -> {len(summarized)} chars (summarized)")
+            result_size = len(str(result))
+            summary_size = len(summarized)
+            compression_ratio = (1 - summary_size / result_size) * 100 if result_size > 0 else 0
+            
+            logger.info(f"Function {function_name} result: {result_size:,} chars -> {summary_size:,} chars ({compression_ratio:.1f}% reduction)")
             logger.info(f"Full result saved to: {result_path}")
 
             return summarized
