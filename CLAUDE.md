@@ -12,14 +12,19 @@ This is **mdk_mcp** (Neglected Diagnostics MCP), an MCP-based system for biologi
 
 **MCP Server Architecture**: The system is organized into consolidated MCP servers, each handling a major phase of the analysis pipeline:
 
-- **Database Server** (`mcp_servers/database_server/`): Unified access to NCBI, BOLD, SILVA, UNITE, and SRA databases via gget and BioPython
-- **Processing Server** (planned): Quality control, deduplication, masking, chimera detection
-- **Alignment Server** (planned): MAFFT/MUSCLE alignment + phylogenetic analysis
-- **Design Server** (planned): Signature region discovery + Primer3 primer design
-- **Validation Server** (planned): BLAST validation + in-silico PCR + literature search
-- **Export Server** (planned): Results export + provenance tracking
+- **Database Server** (`mcp_servers/database_server/`) ✅ **COMPLETED**: Unified access to NCBI, BOLD, SILVA, UNITE, and SRA databases via gget and BioPython
+- **Processing Server** (`mcp_servers/processing_server/`) ✅ **COMPLETED**: Quality control, deduplication, masking, chimera detection via seqkit and vsearch
+- **Alignment Server** (not yet implemented): MAFFT/MUSCLE alignment + phylogenetic analysis + CIAlign
+- **Design Server** (not yet implemented): Signature region discovery + Primer3 primer design + CIAlign consensus
+- **Validation Server** (not yet implemented): BLAST validation + in-silico PCR + literature search
+- **Export Server** (not yet implemented): Results export + provenance tracking
 
-**Current Status**: Phase 1 (Database Integration) is implemented. The database server provides 12+ MCP tools for sequence retrieval, taxonomic queries, and SRA/BioProject searches.
+**Current Status (as of October 2025)**:
+- **Phase 1 Complete**: Database Integration MCP server (11 tools)
+- **Phase 2 Complete**: Processing MCP server (5 tools)
+- **AG2 Integration Complete**: Multi-agent system with MCP bridge functional and tested
+- **Testing Infrastructure**: Comprehensive MCP Inspector testing guides and automation
+- **Ready for Phase 3**: System ready to begin Alignment Server implementation
 
 ## Key Technologies
 
@@ -28,6 +33,8 @@ This is **mdk_mcp** (Neglected Diagnostics MCP), an MCP-based system for biologi
 - **gget**: Standardized genomic database access (Ensembl, NCBI, UniProt)
 - **BioPython**: Sequence parsing and manipulation
 - **pysradb**: SRA/BioProject metadata access
+- **seqkit**: Fast FASTA/Q manipulation and statistics
+- **vsearch**: Clustering, dereplication, chimera detection, DUST masking
 - **Docker**: Containerized MCP servers with isolated dependencies
 - **Kubernetes**: Production orchestration and auto-scaling
 
@@ -78,15 +85,36 @@ cd autogen_app
 pytest tests/
 ```
 
-### Testing
+### Testing MCP Servers
 
 ```bash
-# Run tests for database server
+# Quick automated testing
+./test_mcp_server.sh database    # Test database server
+./test_mcp_server.sh processing  # Test processing server
+
+# Interactive testing with MCP Inspector (UI mode)
+cd mcp_servers/database_server
+npx @modelcontextprotocol/inspector python3 database_mcp_server.py
+# Open http://localhost:6274
+
+cd mcp_servers/processing_server
+npx @modelcontextprotocol/inspector python3 processing_mcp_server.py
+# Open http://localhost:6274
+
+# CLI testing
+npx @modelcontextprotocol/inspector \
+  --method tools/list \
+  python3 database_mcp_server.py
+
+# Run unit tests
 cd mcp_servers/database_server
 python -m pytest tests/ -v
 
-# Test specific MCP tool
-python tests/test_mcp_client.py
+cd mcp_servers/processing_server
+python -m pytest tests/ -v
+
+# See comprehensive guide
+# docs/MCP_TESTING_GUIDE.md
 ```
 
 ### Configuration
@@ -196,14 +224,24 @@ async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
 ## Roadmap Reference
 
 The project follows a 6-phase roadmap (see `road_map.md`):
-- Phase 1: Database Integration (current, 5-7 weeks)
-- Phase 2: Sequence Processing (3 weeks)
-- Phase 3: Alignment & Phylogenetics (4-5 weeks)
+- **Phase 1: Database Integration** ✅ **COMPLETED** (7 weeks actual)
+  - 11 MCP tools implemented: get_sequences, gget_ref, gget_search, gget_info, gget_seq, get_neighbors, get_taxonomy, search_sra_studies, get_sra_runinfo, search_sra_cloud, extract_sequence_columns
+  - Unified access to NCBI, BOLD, SILVA, UNITE, SRA via gget and BioPython
+  - Full test coverage with pytest
+  - Docker containerization complete
+  - AG2 integration bridge implemented and tested
+- **Phase 2: Sequence Processing** ✅ **COMPLETED** (1 day actual - ahead of 3-week estimate!)
+  - 5 MCP tools implemented: fasta_qc, dereplicate_sequences, mask_low_complexity, detect_chimeras, process_sequences
+  - seqkit for QC and statistics, vsearch for clustering/masking/chimera detection
+  - Comprehensive MCP Inspector testing guides created
+  - Docker containerization with seqkit v2.6.1 + vsearch v2.25.0
+  - Test automation scripts and documentation
+- **Phase 3: Alignment & Phylogenetics** 🔜 **NEXT** (4-5 weeks estimated)
+  - Will include: MAFFT, MUSCLE, Clustal Omega, CIAlign for alignment cleaning
 - Phase 4: Design & Primers (7-9 weeks)
+  - Will include: Signature region discovery, Primer3, CIAlign for consensus generation
 - Phase 5: Validation & Literature (4-5 weeks)
 - Phase 6: Export & Provenance (1-2 weeks)
-
-Detailed implementation actions for Phases 1-2 are in `phase1-2-actions.md`.
 
 ## Dependencies and Versions
 
@@ -253,4 +291,53 @@ sequences = await bridge.call_tool("database", "get_sequences", {
 - Cloud SQL (BigQuery/Athena) requires additional credentials setup
 - Rate limiting is basic (no distributed rate limiting across instances)
 - No caching layer implemented yet (planned for future)
-- Phases 2-6 MCP servers not yet implemented (only Phase 1 Database complete)
+- **Phases 3-6 MCP servers not yet implemented** (Phases 1-2 complete: Database + Processing)
+
+## What's Been Accomplished
+
+### Phase 1: Database Server
+- ✅ 11 fully functional MCP tools for sequence retrieval and database access
+- ✅ gget integration for standardized Ensembl/NCBI access
+- ✅ BioPython integration for direct NCBI queries
+- ✅ pysradb integration for SRA/BioProject searches
+- ✅ Sequence metadata extraction tool with multiple output formats (JSON, CSV, TSV, table)
+- ✅ Docker containerization with proper dependency management
+- ✅ Test coverage with pytest
+- ✅ Configuration management via environment variables
+
+### Phase 2: Processing Server
+- ✅ 5 fully functional MCP tools for sequence processing
+- ✅ seqkit integration for QC, statistics, and basic filtering
+- ✅ vsearch integration for clustering, masking (DUST), chimera detection (UCHIME)
+- ✅ BioPython for sequence parsing and N-content filtering
+- ✅ Unified pipeline orchestration tool (`process_sequences`)
+- ✅ Docker containerization with seqkit + vsearch
+- ✅ Comprehensive error handling and statistics tracking
+- ✅ Test coverage with pytest
+- ✅ Complete implementation documentation (README, IMPLEMENTATION_SUMMARY)
+
+### AG2 Integration
+- ✅ MCPClientBridge implemented (`autogen_app/autogen_mcp_bridge.py`)
+- ✅ Multi-agent qPCR assistant system (`autogen_app/qpcr_assistant.py`)
+- ✅ Docker Compose deployment for integrated AG2+MCP system
+- ✅ Interactive chat interface for natural language primer design requests
+- ✅ Tested and functional end-to-end workflow
+- ✅ Sequence organization with automatic file management and README generation
+
+### Testing Infrastructure
+- ✅ MCP Inspector testing guide (741 lines, comprehensive)
+- ✅ MCP testing quick reference card
+- ✅ Automated test script (`test_mcp_server.sh`)
+- ✅ Updated documentation with testing sections
+
+## What's Next (Phase 3)
+
+The Alignment Server is the next priority, which will add:
+- Multiple alignment algorithms (MAFFT, MUSCLE, Clustal Omega, gget_muscle)
+- CIAlign for alignment cleaning and quality assessment
+- Phylogenetic tree construction (NJ, ML methods)
+- Distance matrix calculation
+- Alignment statistics and visualization preparation
+- Unified `align_and_analyze` pipeline tool
+
+See `road_map.md` Phase 3 for detailed specifications.

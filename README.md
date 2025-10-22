@@ -184,7 +184,7 @@ Logs include:
 - **[CLAUDE.md](CLAUDE.md)** - Project overview and development guide
 - **[docs/AUTOGEN_INTEGRATION.md](docs/AUTOGEN_INTEGRATION.md)** - AG2 integration details
 - **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** - Production deployment guide
-- **[docs/road_map.md](docs/road_map.md)** - Development roadmap (6 phases)
+- **[road_map.md](road_map.md)** - Development roadmap (6 phases)
 
 ### Historical Documentation
 
@@ -438,6 +438,26 @@ Contributions are welcome! Areas needing help:
 - REST API for programmatic access
 
 ### Testing
+
+**MCP Server Testing:**
+- 📘 **[Complete Testing Guide](docs/MCP_TESTING_GUIDE.md)** - Comprehensive guide for testing MCP servers with Inspector
+- 📋 **[Quick Reference](docs/MCP_TESTING_QUICKREF.md)** - Quick commands and examples
+- 🧪 **Automated Script**: `./test_mcp_server.sh [database|processing]`
+
+**Test with MCP Inspector:**
+```bash
+# Database server
+cd mcp_servers/database_server
+npx @modelcontextprotocol/inspector python3 database_mcp_server.py
+
+# Processing server
+cd mcp_servers/processing_server
+npx @modelcontextprotocol/inspector python3 processing_mcp_server.py
+
+# Then open http://localhost:6274
+```
+
+**Integration Testing:**
 - Integration tests for multi-agent workflows
 - Load testing for production scenarios
 - End-to-end workflow validation
@@ -464,34 +484,51 @@ Contributions are welcome! Areas needing help:
 
 ## 📊 Current Status
 
-**Phase 1 (Database Integration): 95% Complete**
+**Overall Progress: Phase 1 & 2 Complete (33% of 6-phase roadmap)**
 
-✅ **Completed:**
-- MCP database server with 5 tools
-- AG2 multi-agent system
-- Interactive chat interface with readline support
-- MCP bridge for stdio communication
-- Comprehensive task logging (JSON + text summaries)
+### ✅ Phase 1: Database Integration (COMPLETE)
+- 11 MCP tools for sequence retrieval from NCBI, BOLD, SILVA, UNITE, SRA
+- gget integration for Ensembl/NCBI access
+- Sequence metadata extraction with multiple output formats
 - Docker containerization
-- Graceful shutdown handling
-- Input validation and error handling
-- Token usage optimization
-- Documentation suite
-- **Multi-LLM support** (Gemini 2.5 Flash Lite + GPT-4)
-- **1M token context window** via Gemini
-- Automatic API key resolution from environment
+- Test coverage with pytest
+- Full documentation
 
-🔬 **Experimental:**
-- Streaming responses
-- Advanced filtering and search
-- Custom Gemini client wrapper for AG2
+### ✅ Phase 2: Sequence Processing (COMPLETE)
+- 5 MCP tools for sequence QC, dereplication, masking, chimera detection
+- seqkit integration for QC and statistics
+- vsearch integration for clustering, DUST masking, UCHIME chimera detection
+- Unified pipeline orchestration tool
+- Docker containerization
+- Comprehensive testing guides with MCP Inspector
+- Test automation scripts
 
-📋 **Next Steps:**
-- Complete Phase 1 testing with complex workflows
-- Begin Phase 2 (Processing Server)
-- Implement REST API
-- Add Web UI
-- Migrate to database-backed sequence storage
+### ✅ AG2 Multi-Agent System (COMPLETE)
+- MCPClientBridge for AG2 ↔ MCP communication
+- Multi-agent qPCR assistant system
+- Interactive chat interface with readline support
+- Comprehensive task logging (JSON + text summaries)
+- Docker Compose deployment
+- Multi-LLM support (Gemini 2.5 Flash Lite + GPT-4)
+- 1M token context window via Gemini
+
+### ✅ Testing Infrastructure (NEW)
+- MCP Inspector testing guide (comprehensive)
+- Quick reference cards for all tools
+- Automated test scripts
+- Both UI and CLI testing methods documented
+
+### 🔜 Phase 3: Alignment & Phylogenetics (NEXT)
+- MAFFT, MUSCLE, Clustal Omega alignment
+- CIAlign for alignment cleaning
+- Phylogenetic tree construction
+- Distance matrix calculation
+- Estimated: 4-5 weeks
+
+### 📋 Future Phases
+- Phase 4: Design & Primers (7-9 weeks)
+- Phase 5: Validation & Literature (4-5 weeks)
+- Phase 6: Export & Provenance (1-2 weeks)
 
 See **[docs/road_map.md](docs/road_map.md)** for complete timeline.
 

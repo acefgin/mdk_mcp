@@ -5,3 +5,6 @@ mcp_servers/database_server/__pycache__/
 *.md
 !READMD.md
 !CLAUDE.md
+.mcp.json
+.mcp.local.json
+.mcp.json.backup

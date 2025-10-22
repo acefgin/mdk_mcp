@@ -1,0 +1,55 @@
+{
+  "name": "ndiag-processing-server",
+  "version": "0.1.0",
+  "description": "MCP server for sequence processing: QC, dereplication, masking, chimera detection",
+  "author": "Neglected Diagnostics MCP Team",
+  "license": "MIT",
+  "transport": "stdio",
+  "container": {
+    "image": "ndiag-processing-server:latest",
+    "dockerfile": "./Dockerfile"
+  },
+  "capabilities": {
+    "tools": [
+      {
+        "name": "fasta_qc",
+        "description": "Quality control: filter by length, N-content, remove duplicates"
+      },
+      {
+        "name": "dereplicate_sequences",
+        "description": "Remove duplicate/near-duplicate sequences via clustering"
+      },
+      {
+        "name": "mask_low_complexity",
+        "description": "Mask low-complexity regions using DUST algorithm"
+      },
+      {
+        "name": "detect_chimeras",
+        "description": "Detect chimeric sequences using UCHIME"
+      },
+      {
+        "name": "process_sequences",
+        "description": "Unified pipeline combining multiple processing steps"
+      }
+    ]
+  },
+  "configuration": {
+    "env": {
+      "LOG_LEVEL": "INFO",
+      "TEMP_DIR": "/tmp/mcp_processing",
+      "DEFAULT_MIN_LENGTH": "100",
+      "DEFAULT_MAX_N_PERCENT": "5.0",
+      "DEFAULT_IDENTITY_THRESHOLD": "0.97"
+    }
+  },
+  "dependencies": {
+    "system": [
+      "seqkit>=2.6.0",
+      "vsearch>=2.25.0"
+    ],
+    "python": [
+      "mcp>=0.9.0",
+      "biopython>=1.81"
+    ]
+  }
+}

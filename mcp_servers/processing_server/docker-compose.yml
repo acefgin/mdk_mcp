@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  processing-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ndiag-processing-server
+    image: ndiag-processing-server:latest
+    stdin_open: true  # Keep stdin open for MCP stdio protocol
+    tty: false
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - TEMP_DIR=/tmp/mcp_processing
+      - MAX_SEQUENCES=${MAX_SEQUENCES:-10000}
+      - DEFAULT_MIN_LENGTH=${DEFAULT_MIN_LENGTH:-100}
+      - DEFAULT_MAX_N_PERCENT=${DEFAULT_MAX_N_PERCENT:-5.0}
+      - DEFAULT_IDENTITY_THRESHOLD=${DEFAULT_IDENTITY_THRESHOLD:-0.97}
+    volumes:
+      - processing_cache:/tmp/mcp_processing
+    restart: unless-stopped
+    networks:
+      - mcp-network
+
+volumes:
+  processing_cache:
+    driver: local
+
+networks:
+  mcp-network:
+    driver: bridge

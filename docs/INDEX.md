@@ -21,6 +21,11 @@ This directory contains all documentation for the mdk_mcp project.
 - **[AUTOGEN_INTEGRATION.md](AUTOGEN_INTEGRATION.md)** - AG2 integration details
 - **[road_map.md](road_map.md)** - Development roadmap (6 phases)
 
+**Testing:**
+- **[MCP_TESTING_GUIDE.md](MCP_TESTING_GUIDE.md)** - Comprehensive MCP server testing guide
+- **[MCP_TESTING_QUICKREF.md](MCP_TESTING_QUICKREF.md)** - Quick reference for testing
+- **[../test_mcp_server.sh](../test_mcp_server.sh)** - Automated test script
+
 **Deployment:**
 - **[DEPLOYMENT.md](DEPLOYMENT.md)** - Production deployment guide (Docker + Kubernetes)
 
@@ -108,13 +113,34 @@ This directory contains all documentation for the mdk_mcp project.
 - **Audience:** Developers, project managers
 - **Contents:**
   - 6-phase implementation plan
-  - Phase 1: Database Integration (current)
-  - Phase 2: Sequence Processing
-  - Phase 3: Alignment & Phylogenetics
+  - Phase 1: Database Integration ✅ (complete)
+  - Phase 2: Sequence Processing ✅ (complete)
+  - Phase 3: Alignment & Phylogenetics (next)
   - Phase 4: Design & Primers
   - Phase 5: Validation & Literature
   - Phase 6: Export & Provenance
   - Timeline estimates
+
+#### [MCP_TESTING_GUIDE.md](MCP_TESTING_GUIDE.md)
+- **Purpose:** Complete guide for testing MCP servers
+- **Audience:** Developers, QA testers
+- **Contents:**
+  - MCP Inspector overview (UI & CLI modes)
+  - Testing database server (11 tools)
+  - Testing processing server (5 tools)
+  - Troubleshooting common issues
+  - CLI testing commands
+  - Integration testing workflows
+  - Best practices
+
+#### [MCP_TESTING_QUICKREF.md](MCP_TESTING_QUICKREF.md)
+- **Purpose:** Quick reference card for MCP testing
+- **Audience:** Developers
+- **Contents:**
+  - Quick start commands
+  - Tool parameter examples
+  - Common troubleshooting fixes
+  - Example test workflows
 
 ### Historical Documentation (Archive)
 
@@ -163,6 +189,11 @@ This directory contains all documentation for the mdk_mcp project.
 - [../CLAUDE.md](../CLAUDE.md) - Development guidelines
 - [AUTOGEN_INTEGRATION.md](AUTOGEN_INTEGRATION.md) - Technical details
 - [road_map.md](road_map.md) - Roadmap
+
+### Testing
+- [MCP_TESTING_GUIDE.md](MCP_TESTING_GUIDE.md) - Complete testing guide
+- [MCP_TESTING_QUICKREF.md](MCP_TESTING_QUICKREF.md) - Quick reference
+- [../test_mcp_server.sh](../test_mcp_server.sh) - Automated test script
 
 ## 📝 Documentation Standards
 
@@ -216,6 +247,6 @@ All documentation improvements are welcome!
 
 ---
 
-**Document Version:** 1.0
-**Last Updated:** 2025-10-01
-**Status:** Current
+**Document Version:** 2.0
+**Last Updated:** 2025-10-22
+**Status:** Current (Updated for Phase 2 completion + testing infrastructure)
