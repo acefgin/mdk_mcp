@@ -39,6 +39,27 @@ fi
 echo -e "${COLOR_GREEN}✓ npx found${COLOR_RESET}"
 echo ""
 
+# Check for existing inspector processes
+if lsof -i :6274 &> /dev/null || lsof -i :6277 &> /dev/null; then
+    echo -e "${COLOR_YELLOW}⚠ Inspector ports (6274, 6277) are already in use${COLOR_RESET}"
+    echo "Existing inspector processes found:"
+    ps aux | grep -E "inspector|6274|6277" | grep -v grep | head -5
+    echo ""
+    read -p "Kill existing inspector processes? (y/N): " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        echo "Killing existing inspector processes..."
+        pkill -f "@modelcontextprotocol/inspector" || true
+        sleep 2
+        echo -e "${COLOR_GREEN}✓ Cleaned up existing processes${COLOR_RESET}"
+    else
+        echo -e "${COLOR_RED}✗ Cannot start inspector while ports are in use${COLOR_RESET}"
+        echo "Please manually kill the processes or use different ports"
+        exit 1
+    fi
+    echo ""
+fi
+
 case "$SERVER_TYPE" in
   database)
     echo -e "${COLOR_BLUE}Testing Database Server${COLOR_RESET}"
@@ -65,10 +86,98 @@ case "$SERVER_TYPE" in
     fi
 
     echo ""
-    echo -e "${COLOR_BLUE}Listing available tools...${COLOR_RESET}"
-    npx @modelcontextprotocol/inspector \
-      --method tools/list \
-      python3 database_mcp_server.py 2>/dev/null | head -20
+    echo -e "${COLOR_BLUE}Testing server communication...${COLOR_RESET}"
+    
+    # Test server by sending a direct MCP request
+    TEST_OUTPUT=$(timeout 5 python3 << 'EOF' 2>&1
+import asyncio
+import json
+import sys
+
+async def test_server():
+    proc = await asyncio.create_subprocess_exec(
+        "python3", "database_mcp_server.py",
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+    
+    # Send initialize request
+    init_req = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "test", "version": "1.0"}
+        }
+    }
+    
+    proc.stdin.write((json.dumps(init_req) + "\n").encode())
+    await proc.stdin.drain()
+    
+    # Read response
+    response = await asyncio.wait_for(proc.stdout.readline(), timeout=3)
+    init_result = json.loads(response.decode())
+    
+    if not init_result.get("result"):
+        print(f"ERROR: Init failed: {init_result}")
+        proc.kill()
+        return False
+    
+    # Send tools/list request
+    tools_req = {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/list",
+        "params": {}
+    }
+    
+    proc.stdin.write((json.dumps(tools_req) + "\n").encode())
+    await proc.stdin.drain()
+    
+    # Read response
+    response = await asyncio.wait_for(proc.stdout.readline(), timeout=3)
+    tools_result = json.loads(response.decode())
+    
+    if tools_result.get("result") and tools_result["result"].get("tools"):
+        tools = tools_result["result"]["tools"]
+        print(f"✓ Server responded with {len(tools)} tools:")
+        for tool in tools[:5]:
+            print(f"  - {tool['name']}")
+        if len(tools) > 5:
+            print(f"  ... and {len(tools) - 5} more")
+    else:
+        print(f"ERROR: Tools list failed: {tools_result}")
+        proc.kill()
+        return False
+    
+    proc.kill()
+    return True
+
+try:
+    result = asyncio.run(test_server())
+    sys.exit(0 if result else 1)
+except Exception as e:
+    print(f"ERROR: {e}")
+    sys.exit(1)
+EOF
+)
+    TEST_EXIT=$?
+    
+    if [ $TEST_EXIT -ne 0 ]; then
+        echo -e "${COLOR_RED}✗ Server test failed${COLOR_RESET}"
+        echo "$TEST_OUTPUT"
+        echo ""
+        echo "Troubleshooting:"
+        echo "  1. Check Python dependencies: python3 -c 'import gget, Bio, pysradb'"
+        echo "  2. Check server directly: python3 database_mcp_server.py"
+        echo "  3. Check logs for errors"
+        exit 1
+    fi
+    
+    echo "$TEST_OUTPUT"
 
     echo ""
     echo -e "${COLOR_GREEN}========================================${COLOR_RESET}"
@@ -137,9 +246,25 @@ case "$SERVER_TYPE" in
 
     echo ""
     echo -e "${COLOR_BLUE}Listing available tools...${COLOR_RESET}"
-    npx @modelcontextprotocol/inspector \
+    
+    # Capture inspector output and check for errors
+    INSPECTOR_OUTPUT=$(npx @modelcontextprotocol/inspector \
       --method tools/list \
-      python3 processing_mcp_server.py 2>/dev/null | head -20
+      python3 processing_mcp_server.py 2>&1)
+    INSPECTOR_EXIT=$?
+    
+    if [ $INSPECTOR_EXIT -ne 0 ] || echo "$INSPECTOR_OUTPUT" | grep -q "PORT IS IN USE\|error\|Error"; then
+        echo -e "${COLOR_RED}✗ Inspector failed to start${COLOR_RESET}"
+        echo "$INSPECTOR_OUTPUT" | head -10
+        echo ""
+        echo "Troubleshooting:"
+        echo "  1. Check if ports 6274, 6277 are available: lsof -i :6274 -i :6277"
+        echo "  2. Kill existing inspector: pkill -f inspector"
+        echo "  3. Check Python server directly: python3 processing_mcp_server.py --help"
+        exit 1
+    fi
+    
+    echo "$INSPECTOR_OUTPUT" | head -20
 
     echo ""
     echo -e "${COLOR_GREEN}========================================${COLOR_RESET}"

@@ -130,18 +130,26 @@ Three specialized AI agents collaborate on qPCR design:
 | Agent | Role | Capabilities |
 |-------|------|-------------|
 | **Coordinator** | Project Manager | Analyzes requests, creates workflow plans, coordinates agents |
-| **DatabaseAgent** | Data Specialist | Retrieves sequences from NCBI/BOLD using 5 MCP tools |
+| **DatabaseAgent** | Data Specialist | Retrieves and processes sequences using 10 MCP tools (Phase 1 & 2) |
 | **AnalystAgent** | Biology Expert | Analyzes sequences, identifies signature regions, recommends primers |
 
-### 🛠️ MCP Tools (Phase 1 Complete)
+### 🛠️ MCP Tools (Phases 1 & 2 Complete)
 
-**Database Server** provides 5 bioinformatics tools:
+**Database Server** (Phase 1 - Complete) provides 5 bioinformatics tools:
 
 1. **get_sequences** - Retrieve DNA/RNA sequences from NCBI GenBank or BOLD Systems
 2. **get_taxonomy** - Fetch taxonomic information for species
 3. **get_neighbors** - Find taxonomically related species (potential off-targets)
 4. **extract_sequence_columns** - Parse sequence metadata (accession, location, etc.)
 5. **search_sra_studies** - Search SRA database for sequencing projects
+
+**Processing Server** (Phase 2 - Complete) provides 5 sequence processing tools:
+
+1. **fasta_qc** - Quality control and statistics for FASTA/FASTQ files
+2. **dereplicate_sequences** - Remove duplicate sequences and cluster similar sequences
+3. **mask_low_complexity** - Mask low-complexity regions using DUST algorithm
+4. **detect_chimeras** - Identify chimeric sequences using UCHIME algorithm
+5. **process_sequences** - Unified pipeline orchestrating all processing steps
 
 ### 💬 Interactive Chat Interface
 
@@ -353,7 +361,7 @@ See **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** for complete deployment guide.
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
 │  │   Database   │  │  Processing  │  │  Alignment   │  │
 │  │    Server    │  │   Server     │  │   Server     │  │
-│  │  (Phase 1)   │  │  (Phase 2)   │  │  (Phase 3)   │  │
+│  │  (Phase 1✅) │  │  (Phase 2✅) │  │  (Phase 3)   │  │
 │  └──────┬───────┘  └──────────────┘  └──────────────┘  │
 └─────────┼──────────────────────────────────────────────┘
           │
@@ -368,7 +376,7 @@ See **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** for complete deployment guide.
 | Phase | Server | Status | Tools |
 |-------|--------|--------|-------|
 | **Phase 1** | Database | ✅ Complete | get_sequences, get_taxonomy, get_neighbors, extract_sequence_columns, search_sra_studies |
-| **Phase 2** | Processing | 🚧 Planned | quality_control, deduplicate, mask_low_complexity, detect_chimeras |
+| **Phase 2** | Processing | ✅ Complete | fasta_qc, dereplicate_sequences, mask_low_complexity, detect_chimeras, process_sequences |
 | **Phase 3** | Alignment | 🚧 Planned | align_sequences, build_phylogeny, calculate_distances |
 | **Phase 4** | Design | 🚧 Planned | find_signature_regions, design_primers, validate_primers |
 | **Phase 5** | Validation | 🚧 Planned | blast_primers, insilico_pcr, search_literature |
@@ -403,6 +411,13 @@ mdk_mcp/
 │   │   ├── Dockerfile                  # Container definition
 │   │   ├── mcp-server.json             # MCP manifest
 │   │   └── tests/                      # Unit tests
+│   ├── processing_server/              # Phase 2: Sequence processing
+│   │   ├── processing_mcp_server.py    # Server implementation
+│   │   ├── config.py                   # Configuration
+│   │   ├── requirements.txt            # Dependencies
+│   │   ├── Dockerfile                  # Container definition
+│   │   ├── mcp-server.json             # MCP manifest
+│   │   └── tests/                      # Unit tests
 │   └── [future servers...]
 │
 ├── docs/                               # Documentation
@@ -424,9 +439,8 @@ mdk_mcp/
 
 Contributions are welcome! Areas needing help:
 
-### Phase 2-6 Implementation
-- Processing server (quality control, deduplication)
-- Alignment server (MAFFT/MUSCLE integration)
+### Phase 3-6 Implementation
+- Alignment server (MAFFT/MUSCLE/Clustal Omega integration, phylogenetics)
 - Design server (signature region discovery, Primer3)
 - Validation server (BLAST, in-silico PCR)
 - Export server (report generation)
@@ -598,6 +612,8 @@ MIT License - See [LICENSE](LICENSE) file for details.
 - **Model Context Protocol (MCP)** - Tool protocol by Anthropic
 - **gget** - Genomic database access library
 - **BioPython** - Bioinformatics utilities
+- **seqkit** - Fast FASTA/Q file manipulation toolkit
+- **vsearch** - Sequence clustering, dereplication, and chimera detection
 - **NCBI/BOLD/SILVA/UNITE** - Sequence databases
 
 ## 🔗 Links
