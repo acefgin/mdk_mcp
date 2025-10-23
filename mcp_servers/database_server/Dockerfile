@@ -49,5 +49,6 @@ EXPOSE 8000
 # MCP servers use stdio transport, no HTTP health check needed
 # Health check disabled for MCP stdio servers
 
-# Run the MCP server
-CMD ["python", "database_mcp_server.py"]
+# Keep container running - MCP server will be started on-demand via docker exec
+# This prevents the restart loop that occurs when stdio servers exit immediately
+CMD ["tail", "-f", "/dev/null"]

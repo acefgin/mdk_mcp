@@ -57,5 +57,6 @@ USER mcp
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD seqkit version || exit 1
 
-# Run the server using stdio transport
-CMD ["python3", "processing_mcp_server.py"]
+# Keep container running - MCP server will be started on-demand via docker exec
+# This prevents the restart loop that occurs when stdio servers exit immediately
+CMD ["tail", "-f", "/dev/null"]
