@@ -521,8 +521,152 @@ def create_autogen_functions(available_servers: List[str]) -> List[Dict[str, Any
             }
         ])
 
-    # Future servers (when Phase 2+ implemented)
-    # Processing server functions would go here
+    # Processing Server Functions (Phase 2)
+    if "processing" in available_servers:
+        functions.extend([
+            {
+                "name": "fasta_qc",
+                "description": "Perform quality control on FASTA sequences: filter by length, N-content, and remove duplicates. "
+                              "Use this as the first step after retrieving sequences to ensure clean data.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "fasta_content": {
+                            "type": "string",
+                            "description": "Input FASTA sequences (plain text or from file)"
+                        },
+                        "min_length": {
+                            "type": "integer",
+                            "default": 100,
+                            "description": "Minimum sequence length in bp"
+                        },
+                        "max_n_percent": {
+                            "type": "number",
+                            "default": 5.0,
+                            "description": "Maximum percentage of N bases allowed (0-100)"
+                        },
+                        "remove_duplicates": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Remove duplicate sequences"
+                        }
+                    },
+                    "required": ["fasta_content"]
+                }
+            },
+            {
+                "name": "dereplicate_sequences",
+                "description": "Remove duplicate or near-duplicate sequences using clustering at specified identity threshold. "
+                              "Use this to reduce redundancy in sequence sets.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "fasta_content": {
+                            "type": "string",
+                            "description": "Input FASTA sequences"
+                        },
+                        "identity_threshold": {
+                            "type": "number",
+                            "default": 1.0,
+                            "description": "Identity threshold for clustering (0.0-1.0). 1.0=exact duplicates, 0.97=97% similar"
+                        },
+                        "per_species": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Dereplicate within each species separately (requires organism info in headers)"
+                        }
+                    },
+                    "required": ["fasta_content"]
+                }
+            },
+            {
+                "name": "mask_low_complexity",
+                "description": "Mask low-complexity regions (repeats, homopolymers) using DUST algorithm. "
+                              "Use this before alignment to avoid spurious matches.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "fasta_content": {
+                            "type": "string",
+                            "description": "Input FASTA sequences"
+                        },
+                        "dust_threshold": {
+                            "type": "number",
+                            "default": 2.0,
+                            "description": "DUST threshold (lower=more masking). Range: 0.0-100.0"
+                        }
+                    },
+                    "required": ["fasta_content"]
+                }
+            },
+            {
+                "name": "detect_chimeras",
+                "description": "Detect and optionally remove chimeric sequences using UCHIME algorithm. "
+                              "Important for PCR-amplified sequences to ensure authentic sequences.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "fasta_content": {
+                            "type": "string",
+                            "description": "Input FASTA sequences"
+                        },
+                        "remove_chimeras": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Remove chimeras (true) or just report them (false)"
+                        },
+                        "abskew": {
+                            "type": "number",
+                            "default": 2.0,
+                            "description": "Abundance skew threshold (higher=more stringent)"
+                        }
+                    },
+                    "required": ["fasta_content"]
+                }
+            },
+            {
+                "name": "process_sequences",
+                "description": "Run complete quality control pipeline: QC filtering, dereplication, masking, and chimera detection. "
+                              "Use this for comprehensive sequence processing in one step.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "fasta_content": {
+                            "type": "string",
+                            "description": "Input FASTA sequences"
+                        },
+                        "min_length": {
+                            "type": "integer",
+                            "default": 100,
+                            "description": "Minimum sequence length"
+                        },
+                        "max_n_percent": {
+                            "type": "number",
+                            "default": 5.0,
+                            "description": "Maximum N percentage"
+                        },
+                        "identity_threshold": {
+                            "type": "number",
+                            "default": 1.0,
+                            "description": "Dereplication identity threshold"
+                        },
+                        "dust_threshold": {
+                            "type": "number",
+                            "default": 2.0,
+                            "description": "Low-complexity masking threshold"
+                        },
+                        "detect_chimeras": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Enable chimera detection"
+                        }
+                    },
+                    "required": ["fasta_content"]
+                }
+            }
+        ])
+
+    # Future servers (when Phase 3+ implemented)
     # Alignment server functions would go here
     # Design server functions would go here
 
@@ -562,11 +706,18 @@ class AutoGenMCPFunctionExecutor:
             Full, unsummarized result from MCP server (extracted from JSON wrapper)
         """
         function_map = {
+            # Database tools
             "get_sequences": ("database", "get_sequences"),
             "get_taxonomy": ("database", "get_taxonomy"),
             "get_neighbors": ("database", "get_neighbors"),
             "extract_sequence_columns": ("database", "extract_sequence_columns"),
             "search_sra_studies": ("database", "search_sra_studies"),
+            # Processing tools
+            "fasta_qc": ("processing", "fasta_qc"),
+            "dereplicate_sequences": ("processing", "dereplicate_sequences"),
+            "mask_low_complexity": ("processing", "mask_low_complexity"),
+            "detect_chimeras": ("processing", "detect_chimeras"),
+            "process_sequences": ("processing", "process_sequences"),
         }
 
         if function_name not in function_map:
@@ -611,11 +762,18 @@ class AutoGenMCPFunctionExecutor:
         """
         # Map function names to server.tool
         function_map = {
+            # Database tools
             "get_sequences": ("database", "get_sequences"),
             "get_taxonomy": ("database", "get_taxonomy"),
             "get_neighbors": ("database", "get_neighbors"),
             "extract_sequence_columns": ("database", "extract_sequence_columns"),
             "search_sra_studies": ("database", "search_sra_studies"),
+            # Processing tools
+            "fasta_qc": ("processing", "fasta_qc"),
+            "dereplicate_sequences": ("processing", "dereplicate_sequences"),
+            "mask_low_complexity": ("processing", "mask_low_complexity"),
+            "detect_chimeras": ("processing", "detect_chimeras"),
+            "process_sequences": ("processing", "process_sequences"),
         }
 
         if function_name not in function_map:

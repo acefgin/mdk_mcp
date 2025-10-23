@@ -30,14 +30,25 @@ services:
       timeout: 10s
       retries: 3
 
-  # Phase 2: Processing MCP Server (when implemented)
-  # processing-server:
-  #   build: ./mcp_servers/processing_server
-  #   container_name: ndiag-processing-server
-  #   stdin_open: true
-  #   networks:
-  #     - ndiag-network
-  #   restart: unless-stopped
+  # Phase 2: Processing MCP Server
+  processing-server:
+    build: ./mcp_servers/processing_server
+    container_name: ndiag-processing-server
+    stdin_open: true
+    tty: false
+    networks:
+      - ndiag-network
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - TEMP_DIR=/tmp/mcp_cache
+    volumes:
+      - processing_cache:/tmp/mcp_cache
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ps", "aux", "|", "grep", "processing_mcp_server"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # Phase 3: Alignment MCP Server (when implemented)
   # alignment-server:
@@ -66,12 +77,14 @@ services:
     container_name: qpcr-assistant
     depends_on:
       - database-server
+      - processing-server
     networks:
       - ndiag-network
     env_file:
       - ./autogen_app/.env
     environment:
       - MCP_DATABASE_SERVER=ndiag-database-server
+      - MCP_PROCESSING_SERVER=ndiag-processing-server
     volumes:
       - ./autogen_app:/app
       - ./results:/results  # Persist primer designs and reports
@@ -104,6 +117,8 @@ networks:
 
 volumes:
   database_cache:
+    driver: local
+  processing_cache:
     driver: local
   results:
     driver: local

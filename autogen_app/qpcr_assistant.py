@@ -385,26 +385,26 @@ class QPCRAssistant:
     def _build_database_agent_llm_config(self) -> Dict[str, Any]:
         """
         Build LLM configuration specifically for DatabaseAgent with function schemas.
-        
+
         CRITICAL: Function calling in AutoGen requires TWO components:
         1. Function SCHEMAS in llm_config (tells LLM which functions exist)
            - This method adds those schemas
         2. Function HANDLERS in function_map (tells AutoGen how to execute)
            - These are registered separately via agent.register_function()
-        
+
         Both are required for successful function calling.
         """
         # Start with base config
         config = self._build_llm_config().copy()
-        
-        # Add function schemas for MCP tools
+
+        # Add function schemas for MCP tools (database + processing)
         # This tells the LLM which functions are available and how to call them
-        function_schemas = create_autogen_functions(["database"])
+        function_schemas = create_autogen_functions(["database", "processing"])
         config["functions"] = function_schemas
-        
+
         logger.info(f"DatabaseAgent llm_config includes {len(function_schemas)} function schemas")
         logger.debug(f"Function schemas: {[f['name'] for f in function_schemas]}")
-        
+
         return config
 
     def initialize(self):
@@ -431,10 +431,13 @@ class QPCRAssistant:
         server_configs = {
             "database": {
                 "container": os.getenv("MCP_DATABASE_SERVER", "ndiag-database-server"),
-                "command": ["python", "/app/database_mcp_server.py"]
+                "command": ["python3", "/app/database_mcp_server.py"]
+            },
+            "processing": {
+                "container": os.getenv("MCP_PROCESSING_SERVER", "ndiag-processing-server"),
+                "command": ["python3", "/app/processing_mcp_server.py"]
             }
             # Add more servers as phases complete:
-            # "processing": {...},
             # "alignment": {...},
             # "design": {...},
         }
@@ -565,11 +568,18 @@ class QPCRAssistant:
 
         # Create wrappers for all MCP tools
         return {
+            # Database tools
             "get_sequences": make_sync_wrapper("get_sequences"),
             "get_taxonomy": make_sync_wrapper("get_taxonomy"),
             "get_neighbors": make_sync_wrapper("get_neighbors"),
             "extract_sequence_columns": make_sync_wrapper("extract_sequence_columns"),
             "search_sra_studies": make_sync_wrapper("search_sra_studies"),
+            # Processing tools
+            "fasta_qc": make_sync_wrapper("fasta_qc"),
+            "dereplicate_sequences": make_sync_wrapper("dereplicate_sequences"),
+            "mask_low_complexity": make_sync_wrapper("mask_low_complexity"),
+            "detect_chimeras": make_sync_wrapper("detect_chimeras"),
+            "process_sequences": make_sync_wrapper("process_sequences"),
         }
     
     def _handle_sequence_result(self, result: str, kwargs: dict) -> str:
@@ -713,11 +723,18 @@ Do NOT request the full sequence content - it's already saved."""
 
         # Create function map for registration
         function_map = {
+            # Database tools
             "get_sequences": mcp_functions["get_sequences"],
             "get_taxonomy": mcp_functions["get_taxonomy"],
             "get_neighbors": mcp_functions["get_neighbors"],
             "extract_sequence_columns": mcp_functions["extract_sequence_columns"],
             "search_sra_studies": mcp_functions["search_sra_studies"],
+            # Processing tools
+            "fasta_qc": mcp_functions["fasta_qc"],
+            "dereplicate_sequences": mcp_functions["dereplicate_sequences"],
+            "mask_low_complexity": mcp_functions["mask_low_complexity"],
+            "detect_chimeras": mcp_functions["detect_chimeras"],
+            "process_sequences": mcp_functions["process_sequences"],
         }
 
         # 1. Coordinator Agent
