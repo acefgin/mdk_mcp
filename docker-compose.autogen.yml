@@ -43,6 +43,7 @@ services:
       - TEMP_DIR=/tmp/mcp_cache
     volumes:
       - processing_cache:/tmp/mcp_cache
+      - ./results:/results  # Access to sequence files from database server
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "ps", "aux", "|", "grep", "processing_mcp_server"]

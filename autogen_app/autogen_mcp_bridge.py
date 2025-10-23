@@ -527,13 +527,18 @@ def create_autogen_functions(available_servers: List[str]) -> List[Dict[str, Any
             {
                 "name": "fasta_qc",
                 "description": "Perform quality control on FASTA sequences: filter by length, N-content, and remove duplicates. "
-                              "Use this as the first step after retrieving sequences to ensure clean data.",
+                              "Use this as the first step after retrieving sequences to ensure clean data. "
+                              "Provide either fasta_content (string) OR fasta_file (file path from /results/sequences/).",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "fasta_content": {
                             "type": "string",
-                            "description": "Input FASTA sequences (plain text or from file)"
+                            "description": "Input FASTA sequences as plain text (use this OR fasta_file, not both)"
+                        },
+                        "fasta_file": {
+                            "type": "string",
+                            "description": "Path to FASTA file (e.g., /results/sequences/Salmo_salar_COI_20251023_180611.fasta). Use this when sequences are already saved to a file."
                         },
                         "min_length": {
                             "type": "integer",
@@ -551,19 +556,24 @@ def create_autogen_functions(available_servers: List[str]) -> List[Dict[str, Any
                             "description": "Remove duplicate sequences"
                         }
                     },
-                    "required": ["fasta_content"]
+                    "required": []
                 }
             },
             {
                 "name": "dereplicate_sequences",
                 "description": "Remove duplicate or near-duplicate sequences using clustering at specified identity threshold. "
-                              "Use this to reduce redundancy in sequence sets.",
+                              "Use this to reduce redundancy in sequence sets. "
+                              "Provide either fasta_content (string) OR fasta_file (file path from /results/sequences/).",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "fasta_content": {
                             "type": "string",
-                            "description": "Input FASTA sequences"
+                            "description": "Input FASTA sequences as plain text (use this OR fasta_file, not both)"
+                        },
+                        "fasta_file": {
+                            "type": "string",
+                            "description": "Path to FASTA file (e.g., /results/sequences/Salmo_salar_COI_20251023_180611.fasta)"
                         },
                         "identity_threshold": {
                             "type": "number",
@@ -576,19 +586,24 @@ def create_autogen_functions(available_servers: List[str]) -> List[Dict[str, Any
                             "description": "Dereplicate within each species separately (requires organism info in headers)"
                         }
                     },
-                    "required": ["fasta_content"]
+                    "required": []
                 }
             },
             {
                 "name": "mask_low_complexity",
                 "description": "Mask low-complexity regions (repeats, homopolymers) using DUST algorithm. "
-                              "Use this before alignment to avoid spurious matches.",
+                              "Use this before alignment to avoid spurious matches. "
+                              "Provide either fasta_content (string) OR fasta_file (file path from /results/sequences/).",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "fasta_content": {
                             "type": "string",
-                            "description": "Input FASTA sequences"
+                            "description": "Input FASTA sequences as plain text (use this OR fasta_file, not both)"
+                        },
+                        "fasta_file": {
+                            "type": "string",
+                            "description": "Path to FASTA file (e.g., /results/sequences/Salmo_salar_COI_20251023_180611.fasta)"
                         },
                         "dust_threshold": {
                             "type": "number",
@@ -596,19 +611,24 @@ def create_autogen_functions(available_servers: List[str]) -> List[Dict[str, Any
                             "description": "DUST threshold (lower=more masking). Range: 0.0-100.0"
                         }
                     },
-                    "required": ["fasta_content"]
+                    "required": []
                 }
             },
             {
                 "name": "detect_chimeras",
                 "description": "Detect and optionally remove chimeric sequences using UCHIME algorithm. "
-                              "Important for PCR-amplified sequences to ensure authentic sequences.",
+                              "Important for PCR-amplified sequences to ensure authentic sequences. "
+                              "Provide either fasta_content (string) OR fasta_file (file path from /results/sequences/).",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "fasta_content": {
                             "type": "string",
-                            "description": "Input FASTA sequences"
+                            "description": "Input FASTA sequences as plain text (use this OR fasta_file, not both)"
+                        },
+                        "fasta_file": {
+                            "type": "string",
+                            "description": "Path to FASTA file (e.g., /results/sequences/Salmo_salar_COI_20251023_180611.fasta)"
                         },
                         "remove_chimeras": {
                             "type": "boolean",
@@ -621,19 +641,24 @@ def create_autogen_functions(available_servers: List[str]) -> List[Dict[str, Any
                             "description": "Abundance skew threshold (higher=more stringent)"
                         }
                     },
-                    "required": ["fasta_content"]
+                    "required": []
                 }
             },
             {
                 "name": "process_sequences",
                 "description": "Run complete quality control pipeline: QC filtering, dereplication, masking, and chimera detection. "
-                              "Use this for comprehensive sequence processing in one step.",
+                              "Use this for comprehensive sequence processing in one step. "
+                              "Provide either fasta_content (string) OR fasta_file (file path from /results/sequences/).",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "fasta_content": {
                             "type": "string",
-                            "description": "Input FASTA sequences"
+                            "description": "Input FASTA sequences as plain text (use this OR fasta_file, not both)"
+                        },
+                        "fasta_file": {
+                            "type": "string",
+                            "description": "Path to FASTA file (e.g., /results/sequences/Salmo_salar_COI_20251023_180611.fasta)"
                         },
                         "min_length": {
                             "type": "integer",
@@ -661,7 +686,7 @@ def create_autogen_functions(available_servers: List[str]) -> List[Dict[str, Any
                             "description": "Enable chimera detection"
                         }
                     },
-                    "required": ["fasta_content"]
+                    "required": []
                 }
             }
         ])
@@ -725,6 +750,22 @@ class AutoGenMCPFunctionExecutor:
 
         server, tool = function_map[function_name]
 
+        # PREPROCESSING: Handle fasta_file parameter for processing tools
+        # If fasta_file is provided, read the file and populate fasta_content
+        if "fasta_file" in arguments and arguments["fasta_file"]:
+            fasta_file_path = arguments["fasta_file"]
+            try:
+                logger.info(f"Reading FASTA file for raw call: {fasta_file_path}")
+                with open(fasta_file_path, 'r') as f:
+                    arguments["fasta_content"] = f.read()
+                # Remove fasta_file from arguments since MCP server expects fasta_content
+                del arguments["fasta_file"]
+                logger.info(f"Loaded {len(arguments['fasta_content'])} characters from {fasta_file_path}")
+            except FileNotFoundError:
+                return f"Error: File not found: {fasta_file_path}"
+            except Exception as e:
+                return f"Error reading file {fasta_file_path}: {str(e)}"
+
         try:
             result = await self.bridge.call_tool(server, tool, arguments)
             
@@ -780,6 +821,22 @@ class AutoGenMCPFunctionExecutor:
             raise ValueError(f"Unknown function: {function_name}")
 
         server, tool = function_map[function_name]
+
+        # PREPROCESSING: Handle fasta_file parameter for processing tools
+        # If fasta_file is provided, read the file and populate fasta_content
+        if "fasta_file" in arguments and arguments["fasta_file"]:
+            fasta_file_path = arguments["fasta_file"]
+            try:
+                logger.info(f"Reading FASTA file: {fasta_file_path}")
+                with open(fasta_file_path, 'r') as f:
+                    arguments["fasta_content"] = f.read()
+                # Remove fasta_file from arguments since MCP server expects fasta_content
+                del arguments["fasta_file"]
+                logger.info(f"Loaded {len(arguments['fasta_content'])} characters from {fasta_file_path}")
+            except FileNotFoundError:
+                return f"Error: File not found: {fasta_file_path}"
+            except Exception as e:
+                return f"Error reading file {fasta_file_path}: {str(e)}"
 
         try:
             result = await self.bridge.call_tool(server, tool, arguments)
