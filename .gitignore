@@ -3,5 +3,9 @@ results/
 __pycache__/
 mcp_servers/database_server/__pycache__/
 *.md
-!READMD.md
+!README.md
 !CLAUDE.md
+!docs/**/*.md
+.mcp.json
+.mcp.local.json
+.mcp.json.backup

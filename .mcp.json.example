@@ -1,0 +1,55 @@
+{
+  "mcpServers": {
+    "brave-search": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+      "env": {
+        "BRAVE_API_KEY": "YOUR_BRAVE_API_KEY_HERE"
+      }
+    },
+    "fetch": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-fetch"]
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_YOUR_GITHUB_TOKEN_HERE"
+      }
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/home/user/projects",
+        "/home/user/documents"
+      ]
+    },
+    "git": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-git",
+        "--repository", "/home/user/projects/repo1"
+      ]
+    },
+    "ndiag-database": {
+      "command": "python3",
+      "args": ["/path/to/mdk_mcp/mcp_servers/database_server/database_mcp_server.py"],
+      "env": {
+        "LOG_LEVEL": "INFO",
+        "TEMP_DIR": "/tmp/mcp_cache",
+        "NCBI_API_KEY": "your_ncbi_key_optional"
+      }
+    },
+    "ndiag-processing": {
+      "command": "python3",
+      "args": ["/path/to/mdk_mcp/mcp_servers/processing_server/processing_mcp_server.py"],
+      "env": {
+        "LOG_LEVEL": "INFO",
+        "TEMP_DIR": "/tmp/mcp_processing"
+      }
+    }
+  }
+}

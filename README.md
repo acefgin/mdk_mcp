@@ -130,18 +130,26 @@ Three specialized AI agents collaborate on qPCR design:
 | Agent | Role | Capabilities |
 |-------|------|-------------|
 | **Coordinator** | Project Manager | Analyzes requests, creates workflow plans, coordinates agents |
-| **DatabaseAgent** | Data Specialist | Retrieves sequences from NCBI/BOLD using 5 MCP tools |
+| **DatabaseAgent** | Data Specialist | Retrieves and processes sequences using 10 MCP tools (Phase 1 & 2) |
 | **AnalystAgent** | Biology Expert | Analyzes sequences, identifies signature regions, recommends primers |
 
-### 🛠️ MCP Tools (Phase 1 Complete)
+### 🛠️ MCP Tools (Phases 1 & 2 Complete)
 
-**Database Server** provides 5 bioinformatics tools:
+**Database Server** (Phase 1 - Complete) provides 5 bioinformatics tools:
 
 1. **get_sequences** - Retrieve DNA/RNA sequences from NCBI GenBank or BOLD Systems
 2. **get_taxonomy** - Fetch taxonomic information for species
 3. **get_neighbors** - Find taxonomically related species (potential off-targets)
 4. **extract_sequence_columns** - Parse sequence metadata (accession, location, etc.)
 5. **search_sra_studies** - Search SRA database for sequencing projects
+
+**Processing Server** (Phase 2 - Complete) provides 5 sequence processing tools:
+
+1. **fasta_qc** - Quality control and statistics for FASTA/FASTQ files
+2. **dereplicate_sequences** - Remove duplicate sequences and cluster similar sequences
+3. **mask_low_complexity** - Mask low-complexity regions using DUST algorithm
+4. **detect_chimeras** - Identify chimeric sequences using UCHIME algorithm
+5. **process_sequences** - Unified pipeline orchestrating all processing steps
 
 ### 💬 Interactive Chat Interface
 
@@ -184,7 +192,7 @@ Logs include:
 - **[CLAUDE.md](CLAUDE.md)** - Project overview and development guide
 - **[docs/AUTOGEN_INTEGRATION.md](docs/AUTOGEN_INTEGRATION.md)** - AG2 integration details
 - **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** - Production deployment guide
-- **[docs/road_map.md](docs/road_map.md)** - Development roadmap (6 phases)
+- **[road_map.md](road_map.md)** - Development roadmap (6 phases)
 
 ### Historical Documentation
 
@@ -353,7 +361,7 @@ See **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** for complete deployment guide.
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
 │  │   Database   │  │  Processing  │  │  Alignment   │  │
 │  │    Server    │  │   Server     │  │   Server     │  │
-│  │  (Phase 1)   │  │  (Phase 2)   │  │  (Phase 3)   │  │
+│  │  (Phase 1✅) │  │  (Phase 2✅) │  │  (Phase 3)   │  │
 │  └──────┬───────┘  └──────────────┘  └──────────────┘  │
 └─────────┼──────────────────────────────────────────────┘
           │
@@ -368,7 +376,7 @@ See **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** for complete deployment guide.
 | Phase | Server | Status | Tools |
 |-------|--------|--------|-------|
 | **Phase 1** | Database | ✅ Complete | get_sequences, get_taxonomy, get_neighbors, extract_sequence_columns, search_sra_studies |
-| **Phase 2** | Processing | 🚧 Planned | quality_control, deduplicate, mask_low_complexity, detect_chimeras |
+| **Phase 2** | Processing | ✅ Complete | fasta_qc, dereplicate_sequences, mask_low_complexity, detect_chimeras, process_sequences |
 | **Phase 3** | Alignment | 🚧 Planned | align_sequences, build_phylogeny, calculate_distances |
 | **Phase 4** | Design | 🚧 Planned | find_signature_regions, design_primers, validate_primers |
 | **Phase 5** | Validation | 🚧 Planned | blast_primers, insilico_pcr, search_literature |
@@ -403,6 +411,13 @@ mdk_mcp/
 │   │   ├── Dockerfile                  # Container definition
 │   │   ├── mcp-server.json             # MCP manifest
 │   │   └── tests/                      # Unit tests
+│   ├── processing_server/              # Phase 2: Sequence processing
+│   │   ├── processing_mcp_server.py    # Server implementation
+│   │   ├── config.py                   # Configuration
+│   │   ├── requirements.txt            # Dependencies
+│   │   ├── Dockerfile                  # Container definition
+│   │   ├── mcp-server.json             # MCP manifest
+│   │   └── tests/                      # Unit tests
 │   └── [future servers...]
 │
 ├── docs/                               # Documentation
@@ -424,9 +439,8 @@ mdk_mcp/
 
 Contributions are welcome! Areas needing help:
 
-### Phase 2-6 Implementation
-- Processing server (quality control, deduplication)
-- Alignment server (MAFFT/MUSCLE integration)
+### Phase 3-6 Implementation
+- Alignment server (MAFFT/MUSCLE/Clustal Omega integration, phylogenetics)
 - Design server (signature region discovery, Primer3)
 - Validation server (BLAST, in-silico PCR)
 - Export server (report generation)
@@ -438,6 +452,26 @@ Contributions are welcome! Areas needing help:
 - REST API for programmatic access
 
 ### Testing
+
+**MCP Server Testing:**
+- 📘 **[Complete Testing Guide](docs/MCP_TESTING_GUIDE.md)** - Comprehensive guide for testing MCP servers with Inspector
+- 📋 **[Quick Reference](docs/MCP_TESTING_QUICKREF.md)** - Quick commands and examples
+- 🧪 **Automated Script**: `./test_mcp_server.sh [database|processing]`
+
+**Test with MCP Inspector:**
+```bash
+# Database server
+cd mcp_servers/database_server
+npx @modelcontextprotocol/inspector python3 database_mcp_server.py
+
+# Processing server
+cd mcp_servers/processing_server
+npx @modelcontextprotocol/inspector python3 processing_mcp_server.py
+
+# Then open http://localhost:6274
+```
+
+**Integration Testing:**
 - Integration tests for multi-agent workflows
 - Load testing for production scenarios
 - End-to-end workflow validation
@@ -464,34 +498,51 @@ Contributions are welcome! Areas needing help:
 
 ## 📊 Current Status
 
-**Phase 1 (Database Integration): 95% Complete**
+**Overall Progress: Phase 1 & 2 Complete (33% of 6-phase roadmap)**
 
-✅ **Completed:**
-- MCP database server with 5 tools
-- AG2 multi-agent system
-- Interactive chat interface with readline support
-- MCP bridge for stdio communication
-- Comprehensive task logging (JSON + text summaries)
+### ✅ Phase 1: Database Integration (COMPLETE)
+- 11 MCP tools for sequence retrieval from NCBI, BOLD, SILVA, UNITE, SRA
+- gget integration for Ensembl/NCBI access
+- Sequence metadata extraction with multiple output formats
 - Docker containerization
-- Graceful shutdown handling
-- Input validation and error handling
-- Token usage optimization
-- Documentation suite
-- **Multi-LLM support** (Gemini 2.5 Flash Lite + GPT-4)
-- **1M token context window** via Gemini
-- Automatic API key resolution from environment
+- Test coverage with pytest
+- Full documentation
 
-🔬 **Experimental:**
-- Streaming responses
-- Advanced filtering and search
-- Custom Gemini client wrapper for AG2
+### ✅ Phase 2: Sequence Processing (COMPLETE)
+- 5 MCP tools for sequence QC, dereplication, masking, chimera detection
+- seqkit integration for QC and statistics
+- vsearch integration for clustering, DUST masking, UCHIME chimera detection
+- Unified pipeline orchestration tool
+- Docker containerization
+- Comprehensive testing guides with MCP Inspector
+- Test automation scripts
 
-📋 **Next Steps:**
-- Complete Phase 1 testing with complex workflows
-- Begin Phase 2 (Processing Server)
-- Implement REST API
-- Add Web UI
-- Migrate to database-backed sequence storage
+### ✅ AG2 Multi-Agent System (COMPLETE)
+- MCPClientBridge for AG2 ↔ MCP communication
+- Multi-agent qPCR assistant system
+- Interactive chat interface with readline support
+- Comprehensive task logging (JSON + text summaries)
+- Docker Compose deployment
+- Multi-LLM support (Gemini 2.5 Flash Lite + GPT-4)
+- 1M token context window via Gemini
+
+### ✅ Testing Infrastructure (NEW)
+- MCP Inspector testing guide (comprehensive)
+- Quick reference cards for all tools
+- Automated test scripts
+- Both UI and CLI testing methods documented
+
+### 🔜 Phase 3: Alignment & Phylogenetics (NEXT)
+- MAFFT, MUSCLE, Clustal Omega alignment
+- CIAlign for alignment cleaning
+- Phylogenetic tree construction
+- Distance matrix calculation
+- Estimated: 4-5 weeks
+
+### 📋 Future Phases
+- Phase 4: Design & Primers (7-9 weeks)
+- Phase 5: Validation & Literature (4-5 weeks)
+- Phase 6: Export & Provenance (1-2 weeks)
 
 See **[docs/road_map.md](docs/road_map.md)** for complete timeline.
 
@@ -561,6 +612,8 @@ MIT License - See [LICENSE](LICENSE) file for details.
 - **Model Context Protocol (MCP)** - Tool protocol by Anthropic
 - **gget** - Genomic database access library
 - **BioPython** - Bioinformatics utilities
+- **seqkit** - Fast FASTA/Q file manipulation toolkit
+- **vsearch** - Sequence clustering, dereplication, and chimera detection
 - **NCBI/BOLD/SILVA/UNITE** - Sequence databases
 
 ## 🔗 Links
