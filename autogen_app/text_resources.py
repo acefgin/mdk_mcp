@@ -413,6 +413,7 @@ WORKFLOW_STEPS_AUTO_OFFTARGETS = [
 
 # Model Display Names
 MODEL_DISPLAY_NAMES = {
+    # Direct Provider Models
     "gemini-2.5-flash-lite": "Google Gemini 2.5 Flash Lite (1M token context, fastest)",
     "gemini-2.0-flash-lite": "Google Gemini 2.0 Flash Lite (1M token context)",
     "gemini-1.5-flash": "Google Gemini 1.5 Flash (1M token context)",
@@ -420,6 +421,19 @@ MODEL_DISPLAY_NAMES = {
     "gemini-pro": "Google Gemini Pro (1M token context)",
     "gpt-4": "OpenAI GPT-4 (128K token context)",
     "gpt-4-turbo": "OpenAI GPT-4 Turbo (128K token context)",
+    "gpt-4o": "OpenAI GPT-4o (128K token context)",
+    "gpt-4o-mini": "OpenAI GPT-4o Mini (128K token context, fast)",
+    
+    # OpenRouter Models
+    "anthropic/claude-3.5-sonnet": "Anthropic Claude 3.5 Sonnet via OpenRouter (200K context, excellent reasoning)",
+    "anthropic/claude-3-opus": "Anthropic Claude 3 Opus via OpenRouter (200K context, most capable)",
+    "anthropic/claude-3-haiku": "Anthropic Claude 3 Haiku via OpenRouter (200K context, fast & cheap)",
+    "google/gemini-2.0-flash-001": "Google Gemini 2.0 Flash via OpenRouter (1M context, fast)",
+    "openai/gpt-4o": "OpenAI GPT-4o via OpenRouter (128K context)",
+    "openai/gpt-4o-mini": "OpenAI GPT-4o Mini via OpenRouter (128K context, fast)",
+    "meta-llama/llama-3.1-70b-instruct": "Meta Llama 3.1 70B via OpenRouter (128K context, open source)",
+    "deepseek/deepseek-chat": "DeepSeek Chat via OpenRouter (64K context, very cheap)",
+    "mistralai/mistral-large": "Mistral Large via OpenRouter (128K context, European AI)",
 }
 
 # Status Messages
