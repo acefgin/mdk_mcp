@@ -646,8 +646,15 @@ def create_autogen_functions(available_servers: List[str]) -> List[Dict[str, Any
             },
             {
                 "name": "process_sequences",
-                "description": "Run complete quality control pipeline: QC filtering, dereplication, masking, and chimera detection. "
-                              "Use this for comprehensive sequence processing in one step. "
+                "description": "Run sequences through a customizable quality control pipeline. "
+                              "WHEN TO USE: Prefer this for batch processing multiple steps in one call. "
+                              "PIPELINE GUIDE: "
+                              "• Basic QC only: ['qc'] - Fast, for trusted data sources "
+                              "• Standard workflow: ['qc', 'dereplicate'] - Recommended for most cases (default) "
+                              "• Comprehensive QC: ['qc', 'dereplicate', 'mask', 'chimera'] - For publication-quality data "
+                              "• Alignment prep: ['qc', 'dereplicate', 'mask'] - Sequences for multiple alignment "
+                              "INDIVIDUAL TOOLS: Use fasta_qc, dereplicate_sequences, mask_low_complexity, detect_chimeras "
+                              "when you need fine-grained control over each step or want to inspect intermediate results. "
                               "Provide either fasta_content (string) OR fasta_file (file path from /results/sequences/).",
                 "parameters": {
                     "type": "object",
@@ -660,30 +667,39 @@ def create_autogen_functions(available_servers: List[str]) -> List[Dict[str, Any
                             "type": "string",
                             "description": "Path to FASTA file (e.g., /results/sequences/Salmo_salar_COI_20251023_180611.fasta)"
                         },
+                        "pipeline": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": ["qc", "dereplicate", "mask", "chimera"]
+                            },
+                            "default": ["qc", "dereplicate", "mask", "chimera"],
+                            "description": "Processing steps to execute in order. Available steps: "
+                                          "'qc' (filter by length/quality), "
+                                          "'dereplicate' (remove duplicates/near-duplicates), "
+                                          "'mask' (mask low-complexity regions), "
+                                          "'chimera' (detect and remove chimeric sequences). "
+                                          "Default is full pipeline for comprehensive quality control."
+                        },
                         "min_length": {
                             "type": "integer",
                             "default": 100,
-                            "description": "Minimum sequence length"
+                            "description": "Minimum sequence length for QC step"
                         },
                         "max_n_percent": {
                             "type": "number",
                             "default": 5.0,
-                            "description": "Maximum N percentage"
+                            "description": "Maximum N percentage for QC step"
                         },
                         "identity_threshold": {
                             "type": "number",
-                            "default": 1.0,
-                            "description": "Dereplication identity threshold"
+                            "default": 0.97,
+                            "description": "Clustering identity threshold for dereplication (0.0-1.0, default 0.97 = 97% identity)"
                         },
                         "dust_threshold": {
                             "type": "number",
                             "default": 2.0,
-                            "description": "Low-complexity masking threshold"
-                        },
-                        "detect_chimeras": {
-                            "type": "boolean",
-                            "default": True,
-                            "description": "Enable chimera detection"
+                            "description": "Low-complexity masking threshold for mask step (lower = more aggressive masking)"
                         }
                     },
                     "required": []

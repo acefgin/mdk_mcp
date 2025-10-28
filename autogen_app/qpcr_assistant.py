@@ -900,6 +900,28 @@ Do NOT request the full sequence content - it's already saved."""
         content = message.get("content", "").rstrip()
         sender = message.get("name", "unknown")
         
+        # 0. WORKFLOW ENFORCEMENT: Check if processing was done before allowing termination
+        # This prevents premature termination when sequences are retrieved but not processed
+        if hasattr(self, 'task_logger') and self.task_logger and self.task_logger.task_log:
+            tool_calls = self.task_logger.task_log[0].get("tool_calls", [])
+            # Check for SUCCESSFUL retrieval and processing (not just attempts)
+            has_successful_retrieval = any(
+                "get_sequences" == tc.get("tool") and tc.get("success", False) 
+                for tc in tool_calls
+            )
+            has_processing = any(
+                tc.get("tool") in ["fasta_qc", "process_sequences", "dereplicate_sequences", 
+                                   "mask_low_complexity", "detect_chimeras"] 
+                for tc in tool_calls
+            )
+            
+            # If sequences were SUCCESSFULLY retrieved but not processed, don't allow termination yet
+            if has_successful_retrieval and not has_processing and content.endswith("TERMINATE"):
+                logger.warning(f"Preventing premature termination from {sender} - sequences retrieved but not processed yet")
+                logger.warning(f"Tool calls so far: retrieval={has_successful_retrieval}, processing={has_processing}")
+                # Don't terminate - let the workflow continue
+                return False
+        
         # 1. Explicit termination condition (highest priority)
         if content.endswith("TERMINATE"):
             logger.info(f"Explicit termination message detected from {sender}: 'TERMINATE'")
@@ -1135,6 +1157,31 @@ Do NOT request the full sequence content - it's already saved."""
             "files_generated": []
         }
         
+        # Use a set to track unique accomplishment categories (prevent duplicates)
+        accomplishment_categories = set()
+        
+        # First, check tool calls from the task logger for direct evidence (MOST RELIABLE)
+        # NOTE: We only count actual TOP-LEVEL tool calls, not internal pipeline steps
+        # to avoid hallucinating accomplishments that didn't actually happen
+        if hasattr(self, 'task_logger') and self.task_logger and self.task_logger.task_log:
+            tool_calls = self.task_logger.task_log[0].get("tool_calls", [])
+            
+            # Track tool-based accomplishments - ONLY count actual tool calls
+            retrieval_count = sum(1 for tc in tool_calls if tc.get("tool") == "get_sequences" and tc.get("success", False))
+            processing_count = sum(1 for tc in tool_calls if tc.get("tool") in ["process_sequences", "fasta_qc"] and tc.get("success", False))
+            
+            # NOTE: We do NOT check for dereplicate_sequences, detect_chimeras, mask_low_complexity
+            # as separate tools because they may be internal steps within process_sequences.
+            # We don't want to hallucinate accomplishments for steps that weren't actually run.
+            
+            # Add accomplishments based on actual tool calls ONLY
+            if retrieval_count > 0:
+                summary["key_accomplishments"].append(f"Retrieved sequences from {retrieval_count} species/datasets")
+                accomplishment_categories.add("retrieval")
+            if processing_count > 0:
+                summary["key_accomplishments"].append(f"Processed {processing_count} sequence sets through quality pipeline")
+                accomplishment_categories.add("processing")
+        
         # Analyze messages to extract key information
         for msg in messages:
             if not isinstance(msg, dict):
@@ -1147,22 +1194,24 @@ Do NOT request the full sequence content - it's already saved."""
             if sender not in summary["agents_involved"]:
                 summary["agents_involved"].append(sender)
             
-            # Extract key accomplishments based on content
+            # Extract key accomplishments based on content (only if not already covered by tool calls)
             content_lower = content.lower()
             
-            # Data retrieval accomplishments
-            if "sequences" in content_lower and "retrieved" in content_lower:
-                summary["key_accomplishments"].append("Sequences retrieved from databases")
-            if "taxonomy" in content_lower and "verified" in content_lower:
+            # Data retrieval accomplishments (only add if not already tracked via tool calls)
+            if "taxonomy" in content_lower and "verified" in content_lower and "taxonomy" not in accomplishment_categories:
                 summary["key_accomplishments"].append("Species taxonomy verified")
-            if "off-target" in content_lower and "identified" in content_lower:
+                accomplishment_categories.add("taxonomy")
+            if "off-target" in content_lower and "identified" in content_lower and "off-targets" not in accomplishment_categories:
                 summary["key_accomplishments"].append("Off-target species identified")
+                accomplishment_categories.add("off-targets")
             
             # Analysis accomplishments
-            if "analysis" in content_lower and "complete" in content_lower:
+            if "analysis" in content_lower and "complete" in content_lower and "analysis" not in accomplishment_categories:
                 summary["key_accomplishments"].append("Sequence analysis completed")
-            if "primer" in content_lower and ("recommended" in content_lower or "designed" in content_lower):
+                accomplishment_categories.add("analysis")
+            if "primer" in content_lower and ("recommended" in content_lower or "designed" in content_lower) and "primer_design" not in accomplishment_categories:
                 summary["key_accomplishments"].append("Primer design recommendations provided")
+                accomplishment_categories.add("primer_design")
             
             # Extract recommendations
             if "recommend" in content_lower or "suggest" in content_lower:

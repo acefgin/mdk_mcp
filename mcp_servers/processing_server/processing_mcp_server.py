@@ -130,6 +130,37 @@ def count_sequences(fasta_content: str) -> int:
     return fasta_content.count('>')
 
 
+def clean_sequences(fasta_content: str) -> str:
+    """
+    Clean sequences by removing gap characters and invalid characters.
+    
+    Removes:
+    - Gap characters: - (dash)
+    - Ambiguous padding: . (dot)
+    - Whitespace within sequences
+    
+    Args:
+        fasta_content: Input FASTA content
+        
+    Returns:
+        Cleaned FASTA content
+    """
+    lines = fasta_content.strip().split('\n')
+    cleaned_lines = []
+    
+    for line in lines:
+        if line.startswith('>'):
+            # Header line - keep as is
+            cleaned_lines.append(line)
+        else:
+            # Sequence line - remove gap characters and invalid chars
+            cleaned_seq = line.replace('-', '').replace('.', '').replace(' ', '').replace('\t', '')
+            if cleaned_seq:  # Only add non-empty sequences
+                cleaned_lines.append(cleaned_seq)
+    
+    return '\n'.join(cleaned_lines)
+
+
 def parse_seqkit_stats(stats_output: str) -> Dict[str, Any]:
     """Parse seqkit stats output into structured format."""
     lines = stats_output.strip().split('\n')
@@ -557,6 +588,7 @@ async def process_sequences_impl(
     Args:
         fasta_content: Input FASTA sequences
         pipeline: List of processing steps (qc, dereplicate, mask, chimera)
+                 Default: ["qc", "dereplicate", "mask", "chimera"] (full comprehensive QC)
         qc_params: Parameters for QC step
         derep_params: Parameters for dereplication step
         mask_params: Parameters for masking step
@@ -566,9 +598,14 @@ async def process_sequences_impl(
         Dict with processed FASTA and cumulative statistics
     """
     if pipeline is None:
-        pipeline = ["qc", "dereplicate"]
+        pipeline = ["qc", "dereplicate", "mask", "chimera"]
 
     logger.info(f"Processing pipeline: {pipeline}")
+
+    # CRITICAL FIX: Clean sequences first to remove gap characters and invalid chars
+    logger.info("Pre-processing: Cleaning sequences (removing gap characters)")
+    fasta_content = clean_sequences(fasta_content)
+    logger.info(f"After cleaning: {count_sequences(fasta_content)} sequences")
 
     # Initialize parameters with defaults
     qc_params = qc_params or {}
@@ -777,8 +814,8 @@ async def handle_list_tools() -> List[types.Tool]:
                             "type": "string",
                             "enum": ["qc", "dereplicate", "mask", "chimera"]
                         },
-                        "default": ["qc", "dereplicate"],
-                        "description": "List of processing steps to execute in order"
+                        "default": ["qc", "dereplicate", "mask", "chimera"],
+                        "description": "List of processing steps to execute in order. Default is full comprehensive QC pipeline."
                     },
                     "qc_params": {
                         "type": "object",
@@ -826,6 +863,13 @@ async def handle_call_tool(
         else:
             result = {"error": f"Unknown tool: {name}"}
 
+        # CRITICAL FIX: If result contains an error, raise an exception
+        # This ensures the MCP protocol sets isError: True
+        if "error" in result and result["error"]:
+            error_msg = result["error"]
+            logger.error(f"Tool {name} returned error: {error_msg}")
+            raise RuntimeError(error_msg)
+
         return [types.TextContent(
             type="text",
             text=json.dumps(result, indent=2)
@@ -833,10 +877,8 @@ async def handle_call_tool(
 
     except Exception as e:
         logger.error(f"Tool execution error: {name}: {str(e)}\n{traceback.format_exc()}")
-        return [types.TextContent(
-            type="text",
-            text=json.dumps({"error": str(e)}, indent=2)
-        )]
+        # Return error as exception to set isError: True
+        raise RuntimeError(f"Tool {name} failed: {str(e)}")
 
 
 # ============================================================================
