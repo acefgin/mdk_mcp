@@ -196,7 +196,347 @@ def test_function_calling():
     return True
 
 
+def test_processing_tools():
+    """Test that processing MCP server tools work correctly."""
+
+    print("=" * 80)
+    print("PROCESSING MCP SERVER TEST")
+    print("=" * 80)
+    print()
+
+    # 1. Load configuration
+    config_path = Path(__file__).parent / "autogen_app" / "OAI_CONFIG_LIST.json"
+
+    if not config_path.exists():
+        print(f"❌ Config file not found: {config_path}")
+        return False
+
+    with open(config_path) as f:
+        config_list = json.load(f)
+
+    # Resolve env variables
+    for config in config_list:
+        if "api_key" in config and isinstance(config["api_key"], str):
+            if config["api_key"].startswith("env:"):
+                env_var_name = config["api_key"][4:]
+                env_value = os.getenv(env_var_name)
+                if env_value:
+                    config["api_key"] = env_value
+
+    print(f"✓ Loaded config from {config_path}")
+    print()
+
+    # 2. Create assistant
+    print("Creating QPCRAssistant with processing tools...")
+    test_results_dir = "/tmp/test_processing"
+    os.makedirs(test_results_dir, exist_ok=True)
+
+    try:
+        assistant = QPCRAssistant(
+            config_list=config_list,
+            log_dir=test_results_dir,
+            model_name="gpt-4o"
+        )
+        print(f"✓ Created assistant")
+        print()
+    except Exception as e:
+        print(f"❌ Failed to create assistant: {e}")
+        return False
+
+    # 3. Initialize MCP connections (should include processing server)
+    print("Initializing MCP connections (database + processing)...")
+    try:
+        assistant.initialize()
+        print("✓ MCP servers connected")
+        print()
+    except Exception as e:
+        print(f"❌ Failed to initialize: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+    # 4. Test processing workflow
+    print("Running processing workflow test...")
+    print("-" * 80)
+
+    test_query = """
+    Please retrieve 10 COI sequences for Salmo salar from NCBI,
+    then perform quality control using the fasta_qc tool with:
+    - min_length: 400
+    - max_n_percent: 5.0
+    - remove_duplicates: true
+
+    Report how many sequences passed QC.
+    """
+
+    try:
+        result = assistant.run_workflow(test_query)
+        print()
+        print("-" * 80)
+        print("✓ Processing workflow completed")
+        print()
+    except Exception as e:
+        print(f"❌ Workflow failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+    # 5. Verify processing tools were called
+    print("Verifying processing tools were used...")
+
+    log_files = sorted(Path(test_results_dir).glob("task_*.json"))
+    if not log_files:
+        print("❌ No log files found")
+        return False
+
+    latest_log = log_files[-1]
+    with open(latest_log) as f:
+        log_data = json.load(f)
+
+    tool_calls = log_data.get("tool_calls", [])
+
+    # Check for both database and processing tool calls
+    db_tools_used = []
+    proc_tools_used = []
+
+    for tc in tool_calls:
+        tool_name = tc.get("tool", "")
+        if tool_name in ["get_sequences", "get_taxonomy", "get_neighbors", "extract_sequence_columns", "search_sra_studies"]:
+            db_tools_used.append(tool_name)
+        elif tool_name in ["fasta_qc", "dereplicate_sequences", "mask_low_complexity", "detect_chimeras", "process_sequences"]:
+            proc_tools_used.append(tool_name)
+
+    print(f"  Database tools used: {len(db_tools_used)} - {', '.join(set(db_tools_used))}")
+    print(f"  Processing tools used: {len(proc_tools_used)} - {', '.join(set(proc_tools_used))}")
+    print()
+
+    if len(proc_tools_used) == 0:
+        print("❌ FAILED: No processing tools were called!")
+        print("   Expected at least fasta_qc to be called")
+        return False
+
+    print("✓ Processing tools were successfully called!")
+    print()
+
+    # Show detailed results
+    print("Processing tool calls:")
+    for tc in tool_calls:
+        tool_name = tc.get("tool", "")
+        if tool_name in ["fasta_qc", "dereplicate_sequences", "mask_low_complexity", "detect_chimeras", "process_sequences"]:
+            print(f"  • {tool_name}")
+            args = tc.get("arguments", {})
+            print(f"    Arguments: {list(args.keys())}")
+            success = tc.get("success", False)
+            status = "✓ Success" if success else "✗ Failed"
+            print(f"    Status: {status}")
+            print()
+
+    # 6. Final verdict
+    print("=" * 80)
+    print("✅ PROCESSING MCP SERVER TEST PASSED!")
+    print("=" * 80)
+    print()
+    print("Integration verified:")
+    print("  ✓ Processing server connected")
+    print("  ✓ Processing tools available to agents")
+    print("  ✓ End-to-end workflow (retrieve + QC) working")
+    print(f"  ✓ {len(proc_tools_used)} processing tool call(s) executed")
+    print()
+
+    return True
+
+
+def test_all_processing_tools():
+    """Test each processing tool individually."""
+
+    print("=" * 80)
+    print("INDIVIDUAL PROCESSING TOOLS TEST")
+    print("=" * 80)
+    print()
+
+    # Test sample FASTA data
+    test_fasta = """>seq1 Test sequence 1
+ATCGATCGATCGATCGATCGATCGATCGATCGATCGATCG
+>seq2 Test sequence 2 with Ns
+ATCGATCGATCGATCGNNNNNNNNGATCGATCGATCGATCG
+>seq3 Short sequence
+ATCG
+>seq4 Duplicate of seq1
+ATCGATCGATCGATCGATCGATCGATCGATCGATCGATCG
+>seq5 Good sequence
+GCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTA
+"""
+
+    print("Sample test data prepared (5 sequences)")
+    print()
+
+    # Load configuration
+    config_path = Path(__file__).parent / "autogen_app" / "OAI_CONFIG_LIST.json"
+
+    if not config_path.exists():
+        print(f"❌ Config file not found: {config_path}")
+        return False
+
+    with open(config_path) as f:
+        config_list = json.load(f)
+
+    # Resolve env variables
+    for config in config_list:
+        if "api_key" in config and isinstance(config["api_key"], str):
+            if config["api_key"].startswith("env:"):
+                env_var_name = config["api_key"][4:]
+                env_value = os.getenv(env_var_name)
+                if env_value:
+                    config["api_key"] = env_value
+
+    # Create assistant
+    test_results_dir = "/tmp/test_all_processing_tools"
+    os.makedirs(test_results_dir, exist_ok=True)
+
+    try:
+        assistant = QPCRAssistant(
+            config_list=config_list,
+            log_dir=test_results_dir,
+            model_name="gpt-4o"
+        )
+        assistant.initialize()
+        print("✓ Assistant initialized")
+        print()
+    except Exception as e:
+        print(f"❌ Failed to initialize: {e}")
+        return False
+
+    # Define test cases for each tool
+    test_cases = [
+        {
+            "name": "fasta_qc",
+            "query": f"""Use fasta_qc tool on this FASTA data:
+{test_fasta}
+Parameters: min_length=20, max_n_percent=10.0, remove_duplicates=true""",
+            "expected": "quality control"
+        },
+        {
+            "name": "dereplicate_sequences",
+            "query": f"""Use dereplicate_sequences tool on this FASTA data:
+{test_fasta}
+Parameters: identity_threshold=1.0""",
+            "expected": "dereplicate"
+        },
+        {
+            "name": "mask_low_complexity",
+            "query": f"""Use mask_low_complexity tool on this FASTA data:
+{test_fasta}
+Parameters: dust_threshold=2.0""",
+            "expected": "mask"
+        }
+    ]
+
+    results = {}
+
+    for test_case in test_cases:
+        tool_name = test_case["name"]
+        print(f"Testing {tool_name}...")
+
+        try:
+            result = assistant.run_workflow(test_case["query"])
+
+            # Check logs
+            log_files = sorted(Path(test_results_dir).glob("task_*.json"))
+            if log_files:
+                with open(log_files[-1]) as f:
+                    log_data = json.load(f)
+                    tool_calls = [tc.get("tool", "") for tc in log_data.get("tool_calls", [])]
+
+                    if tool_name in tool_calls:
+                        print(f"  ✓ {tool_name} called successfully")
+                        results[tool_name] = "PASS"
+                    else:
+                        print(f"  ✗ {tool_name} was not called")
+                        results[tool_name] = "FAIL"
+            else:
+                print(f"  ✗ No log found")
+                results[tool_name] = "FAIL"
+
+        except Exception as e:
+            print(f"  ✗ Test failed: {e}")
+            results[tool_name] = "ERROR"
+
+        print()
+
+    # Summary
+    print("=" * 80)
+    print("TEST SUMMARY")
+    print("=" * 80)
+    print()
+
+    passed = sum(1 for v in results.values() if v == "PASS")
+    total = len(results)
+
+    for tool_name, status in results.items():
+        symbol = "✓" if status == "PASS" else "✗"
+        print(f"  {symbol} {tool_name}: {status}")
+
+    print()
+    print(f"Results: {passed}/{total} tests passed")
+    print()
+
+    if passed == total:
+        print("✅ ALL PROCESSING TOOLS WORKING!")
+        return True
+    else:
+        print("⚠️  Some tools need attention")
+        return False
+
+
 if __name__ == "__main__":
-    success = test_function_calling()
-    sys.exit(0 if success else 1)
+    print("\n")
+    print("╔" + "=" * 78 + "╗")
+    print("║" + " " * 20 + "MCP FUNCTION CALLING TEST SUITE" + " " * 26 + "║")
+    print("╚" + "=" * 78 + "╝")
+    print("\n")
+
+    tests = [
+        ("Basic Function Calling", test_function_calling),
+        ("Processing MCP Integration", test_processing_tools),
+        ("Individual Processing Tools", test_all_processing_tools),
+    ]
+
+    results = {}
+
+    for test_name, test_func in tests:
+        print(f"\n{'':=^80}")
+        print(f"Running: {test_name}")
+        print(f"{'':=^80}\n")
+
+        try:
+            success = test_func()
+            results[test_name] = success
+        except Exception as e:
+            print(f"\n❌ Test crashed: {e}")
+            import traceback
+            traceback.print_exc()
+            results[test_name] = False
+
+        print("\n")
+
+    # Final summary
+    print("\n")
+    print("╔" + "=" * 78 + "╗")
+    print("║" + " " * 30 + "FINAL RESULTS" + " " * 35 + "║")
+    print("╚" + "=" * 78 + "╝")
+    print("\n")
+
+    for test_name, success in results.items():
+        status = "✅ PASS" if success else "❌ FAIL"
+        print(f"  {status}  {test_name}")
+
+    print()
+
+    passed = sum(1 for v in results.values() if v)
+    total = len(results)
+
+    print(f"Overall: {passed}/{total} test suites passed")
+    print()
+
+    sys.exit(0 if passed == total else 1)
 

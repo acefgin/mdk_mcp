@@ -59,7 +59,7 @@ Unified pipeline combining multiple processing steps.
 
 **Parameters:**
 - `fasta_content` (string, required): Input FASTA sequences
-- `pipeline` (array, default: ["qc", "dereplicate"]): Processing steps to execute
+- `pipeline` (array, default: ["qc", "dereplicate", "mask", "chimera"]): Processing steps to execute in order
 - `qc_params` (object, optional): Parameters for QC step
 - `derep_params` (object, optional): Parameters for dereplication step
 - `mask_params` (object, optional): Parameters for masking step

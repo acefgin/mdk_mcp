@@ -7,6 +7,8 @@
 
 An **MCP (Model Context Protocol)** based multi-agent AI system for designing species-specific qPCR assays for molecular diagnostics. The system uses AG2 (formerly AutoGen) to orchestrate specialized AI agents that collaborate to retrieve sequences, analyze data, and recommend primer design strategies.
 
+**🎉 Phase 2 Complete!** The system now includes comprehensive sequence processing capabilities with 16 total MCP tools available.
+
 ## 🎯 What is mdk_mcp?
 
 mdk_mcp is a **bioinformatics automation platform** that combines:
@@ -29,21 +31,33 @@ Scientists can interact naturally with the system to design species-specific qPC
 
 [Coordinator] Planning workflow...
   Step 1: Retrieve COI sequences for Salmo salar
-  Step 2: Retrieve COI sequences for Oncorhynchus mykiss
-  Step 3: Analyze for signature regions
-  Step 4: Recommend primer design strategy
+  Step 2: Perform quality control on sequences
+  Step 3: Retrieve COI sequences for Oncorhynchus mykiss
+  Step 4: Analyze for signature regions
+  Step 5: Recommend primer design strategy
 
 [DatabaseAgent] Calling tool: get_sequences
   Arguments: taxon="Salmo salar", region="COI", max_results=100
-  ✓ Retrieved 100 sequences (292,015 characters)
+  ✓ Retrieved 100 sequences → /results/sequences/Salmo_salar_COI_20251023.fasta
+
+[DatabaseAgent] Calling tool: fasta_qc
+  Arguments: min_length=400, max_n_percent=5.0, remove_duplicates=true
+  ✓ QC Complete: 87 sequences passed (13 removed: 8 short, 3 high N-content, 2 duplicates)
+
+[DatabaseAgent] Calling tool: get_sequences
+  Arguments: taxon="Oncorhynchus mykiss", region="COI", max_results=100
+  ✓ Retrieved 100 sequences → /results/sequences/Oncorhynchus_mykiss_COI_20251023.fasta
 
 [AnalystAgent] Analyzing sequences...
-  • Identified 15 conserved regions in target
+  • Compared 87 Salmo salar vs 95 Oncorhynchus mykiss sequences
+  • Identified 15 conserved regions in target species
   • Found 3 signature regions unique to Salmo salar
   • Recommending primers in signature region 2 (position 450-470)
+  • Expected amplicon size: 120bp
 
 ✓ WORKFLOW COMPLETED
-Task log saved to /results/task_20251001_181530.json
+Task log saved to /results/task_20251023_181530.json
+Sequences saved to /results/sequences/ with README.md
 ```
 
 ## 🚀 Quick Start (3 Steps)
@@ -106,6 +120,27 @@ Type your qPCR design requests naturally:
 
 ## ✨ Key Features
 
+### 🔬 Complete Sequence Processing Pipeline (NEW in Phase 2)
+
+The system now provides end-to-end sequence processing capabilities:
+
+1. **Retrieve** sequences from multiple databases (NCBI, BOLD, SILVA, UNITE)
+2. **Quality Control** - Filter by length, N-content, remove duplicates
+3. **Dereplicate** - Remove redundant sequences, cluster similar ones
+4. **Mask** - Hide low-complexity regions to improve alignment
+5. **Detect Chimeras** - Identify and remove chimeric sequences
+6. **Process** - Run complete pipeline with one command
+
+**Example Workflow:**
+```
+User: "Get 100 COI sequences for Salmo salar and perform quality control"
+
+[DatabaseAgent] → Retrieves 100 sequences from NCBI
+              → Applies QC: min_length=400, max_n_percent=5.0
+              → Result: 87 sequences passed (13 filtered out)
+              → Sequences saved to /results/sequences/
+```
+
 ### 🧠 Multiple LLM Support
 
 The system supports multiple language models with automatic fallback:
@@ -130,26 +165,62 @@ Three specialized AI agents collaborate on qPCR design:
 | Agent | Role | Capabilities |
 |-------|------|-------------|
 | **Coordinator** | Project Manager | Analyzes requests, creates workflow plans, coordinates agents |
-| **DatabaseAgent** | Data Specialist | Retrieves and processes sequences using 10 MCP tools (Phase 1 & 2) |
+| **DatabaseAgent** | Data Specialist | Retrieves and processes sequences using **10 MCP tools** (Phase 1 & 2) |
 | **AnalystAgent** | Biology Expert | Analyzes sequences, identifies signature regions, recommends primers |
 
-### 🛠️ MCP Tools (Phases 1 & 2 Complete)
+### 🛠️ MCP Tools (16 Tools Available - Phases 1 & 2 Complete)
 
-**Database Server** (Phase 1 - Complete) provides 5 bioinformatics tools:
+#### **Database Server** (Phase 1 ✅ - 11 Tools)
 
-1. **get_sequences** - Retrieve DNA/RNA sequences from NCBI GenBank or BOLD Systems
-2. **get_taxonomy** - Fetch taxonomic information for species
-3. **get_neighbors** - Find taxonomically related species (potential off-targets)
-4. **extract_sequence_columns** - Parse sequence metadata (accession, location, etc.)
-5. **search_sra_studies** - Search SRA database for sequencing projects
+Access to multiple genomic databases and sequence retrieval:
 
-**Processing Server** (Phase 2 - Complete) provides 5 sequence processing tools:
+1. **get_sequences** - Retrieve DNA/RNA sequences from NCBI, BOLD, SILVA, UNITE
+2. **gget_ref** - Get reference genomes from Ensembl
+3. **gget_search** - Search Ensembl for genes and transcripts
+4. **gget_info** - Fetch detailed gene/transcript information
+5. **gget_seq** - Retrieve nucleotide or amino acid sequences by ID
+6. **get_taxonomy** - Fetch detailed taxonomic information
+7. **get_neighbors** - Find taxonomically related species (potential off-targets)
+8. **extract_sequence_columns** - Parse sequence metadata (accession, organism, location, etc.)
+9. **search_sra_studies** - Search NCBI SRA database for sequencing projects
+10. **get_sra_runinfo** - Get detailed metadata for SRA runs
+11. **search_sra_cloud** - Query SRA via cloud SQL (BigQuery/Athena)
 
-1. **fasta_qc** - Quality control and statistics for FASTA/FASTQ files
-2. **dereplicate_sequences** - Remove duplicate sequences and cluster similar sequences
-3. **mask_low_complexity** - Mask low-complexity regions using DUST algorithm
-4. **detect_chimeras** - Identify chimeric sequences using UCHIME algorithm
-5. **process_sequences** - Unified pipeline orchestrating all processing steps
+#### **Processing Server** (Phase 2 ✅ - 5 Tools)
+
+Quality control and sequence processing pipeline:
+
+1. **fasta_qc** - Comprehensive quality control with filtering:
+   - Filter by sequence length (min/max)
+   - Filter by N-content percentage
+   - Remove duplicate sequences
+   - Generate detailed statistics
+
+2. **dereplicate_sequences** - Advanced sequence clustering:
+   - Remove exact duplicates (100% identity)
+   - Cluster similar sequences (97-99% identity)
+   - Per-species dereplication option
+   - Maintains representative sequences
+
+3. **mask_low_complexity** - Sequence masking:
+   - DUST algorithm for low-complexity regions
+   - Masks homopolymers and simple repeats
+   - Prevents spurious alignments
+   - Configurable threshold
+
+4. **detect_chimeras** - Chimera detection:
+   - UCHIME algorithm implementation
+   - De novo chimera detection
+   - Optional chimera removal
+   - Abundance-based filtering
+
+5. **process_sequences** - Unified QC pipeline:
+   - Combines all processing steps
+   - Sequential: QC → Dereplicate → Mask → Chimera detection
+   - Single-command workflow
+   - Comprehensive statistics tracking
+
+**Coming Soon**: Alignment Server (Phase 3) - MAFFT, MUSCLE, phylogenetics
 
 ### 💬 Interactive Chat Interface
 
@@ -200,6 +271,38 @@ Logs include:
 
 ## 🧪 Testing
 
+### Quick Integration Test
+
+Test both database and processing servers:
+
+```bash
+# Quick standalone test
+python3 test_processing_integration.py
+
+# Expected output:
+# ✓ Connected to MCP servers
+# ✓ Total functions available: 16 (11 database + 5 processing)
+# ✓ fasta_qc call successful!
+```
+
+### Comprehensive Test Suite
+
+Run all tests including function calling and individual tool tests:
+
+```bash
+# Complete test suite with 3 test suites:
+# 1. Basic Function Calling
+# 2. Processing MCP Integration
+# 3. Individual Processing Tools
+python3 test_function_calling.py
+
+# Expected output:
+# ✅ PASS  Basic Function Calling
+# ✅ PASS  Processing MCP Integration
+# ✅ PASS  Individual Processing Tools
+# Overall: 3/3 test suites passed
+```
+
 ### Manual Testing
 
 ```bash
@@ -208,8 +311,12 @@ Logs include:
 
 # Test with example requests
 ┌─[qPCR Assistant]
-└─> Design qPCR to identify Mycobacterium tuberculosis
-    with specificity against other Mycobacterium species
+└─> Get 50 COI sequences for Salmo salar and run quality control
+    with min_length=400 and max_n_percent=5.0
+
+# Test processing workflow
+┌─[qPCR Assistant]
+└─> Retrieve sequences for E. coli, perform QC, and remove duplicates
 
 # Verify task logs
 ┌─[qPCR Assistant]
@@ -223,8 +330,12 @@ Logs include:
 cd mcp_servers/database_server
 python -m pytest tests/ -v
 
+# Test processing MCP server
+cd mcp_servers/processing_server
+python -m pytest tests/ -v
+
 # Test specific tool
-python -m pytest tests/test_get_sequences.py -v
+python -m pytest tests/test_fasta_qc.py -v
 ```
 
 ### Integration Tests
@@ -236,6 +347,23 @@ python -m pytest tests/test_mcp_bridge.py -v
 
 # Test agent collaboration
 python -m pytest tests/test_multi_agent.py -v
+```
+
+### MCP Server Testing (Interactive)
+
+```bash
+# Test database server with MCP Inspector
+cd mcp_servers/database_server
+npx @modelcontextprotocol/inspector python3 database_mcp_server.py
+# Open http://localhost:6274
+
+# Test processing server with MCP Inspector
+cd mcp_servers/processing_server
+npx @modelcontextprotocol/inspector python3 processing_mcp_server.py
+# Open http://localhost:6274
+
+# See comprehensive testing guide
+cat docs/MCP_TESTING_GUIDE.md
 ```
 
 ### Viewing and Downloading Task Logs
@@ -315,9 +443,10 @@ OPENAI_API_KEY=sk-...          # OpenAI API key for GPT-4
 
 **Optional:**
 ```bash
-NCBI_API_KEY=your-ncbi-key     # Increases NCBI rate limits
-LOG_LEVEL=INFO                 # DEBUG, INFO, WARNING, ERROR
-MCP_DATABASE_SERVER=ndiag-database-server  # Container name
+NCBI_API_KEY=your-ncbi-key                    # Increases NCBI rate limits
+LOG_LEVEL=INFO                                # DEBUG, INFO, WARNING, ERROR
+MCP_DATABASE_SERVER=ndiag-database-server     # Database server container
+MCP_PROCESSING_SERVER=ndiag-processing-server # Processing server container (Phase 2)
 ```
 
 **Getting API Keys:**
@@ -451,155 +580,41 @@ Contributions are welcome! Areas needing help:
 - Web UI (React/Vue frontend)
 - REST API for programmatic access
 
-### Testing
+### Development & Testing
 
-**MCP Server Testing:**
-- 📘 **[Complete Testing Guide](docs/MCP_TESTING_GUIDE.md)** - Comprehensive guide for testing MCP servers with Inspector
-- 📋 **[Quick Reference](docs/MCP_TESTING_QUICKREF.md)** - Quick commands and examples
-- 🧪 **Automated Script**: `./test_mcp_server.sh [database|processing]`
+For developers and contributors:
 
-**Test with MCP Inspector:**
+- 📘 **[TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** - Complete troubleshooting guide
+- 🧪 **[MCP_TESTING_GUIDE.md](docs/MCP_TESTING_GUIDE.md)** - MCP server testing guide
+- 📋 **[MCP_TESTING_QUICKREF.md](docs/MCP_TESTING_QUICKREF.md)** - Quick testing reference
+- 📖 **[AUTOGEN_INTEGRATION.md](docs/AUTOGEN_INTEGRATION.md)** - AG2 architecture details
+- 🗺️ **[road_map.md](road_map.md)** - Development roadmap
+
+**Quick Test Commands:**
 ```bash
-# Database server
+# Run integration test
+python3 test_processing_integration.py
+
+# Run comprehensive test suite
+python3 test_function_calling.py
+
+# Test MCP servers interactively
 cd mcp_servers/database_server
 npx @modelcontextprotocol/inspector python3 database_mcp_server.py
-
-# Processing server
-cd mcp_servers/processing_server
-npx @modelcontextprotocol/inspector python3 processing_mcp_server.py
-
-# Then open http://localhost:6274
 ```
 
-**Integration Testing:**
-- Integration tests for multi-agent workflows
-- Load testing for production scenarios
-- End-to-end workflow validation
+## 📞 Support & Help
 
-## 🐛 Known Issues
+**Having issues?**
+1. 📘 Check **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** for solutions to common problems
+2. 📖 Read the **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)** for detailed usage instructions
+3. 🔍 Search existing [GitHub Issues](https://github.com/acefgin/mdk_mcp/issues)
+4. 🐛 Open a new issue with logs and error messages
 
-### ~~Token Limit Issue~~ (RESOLVED ✅)
-
-**Previous Problem:** Large sequence datasets (100+ sequences, ~292KB) exceeded GPT-4's token limits.
-
-**Solution:** Integrated **Google Gemini 2.5 Flash Lite** with **1 million token context window**:
-- ✅ Handle 100+ sequences (292KB+) without chunking
-- ✅ Process entire datasets in single requests
-- ✅ No workflow failures due to token limits
-- ✅ Free tier available for reasonable usage
-
-**To use:** Set `GOOGLE_API_KEY` in `autogen_app/.env` (see Quick Start above)
-
-### Static Database Sources
-
-**Issue:** SILVA and UNITE integrations are placeholder implementations.
-
-**Status:** Planned for Phase 1 completion.
-
-## 📊 Current Status
-
-**Overall Progress: Phase 1 & 2 Complete (33% of 6-phase roadmap)**
-
-### ✅ Phase 1: Database Integration (COMPLETE)
-- 11 MCP tools for sequence retrieval from NCBI, BOLD, SILVA, UNITE, SRA
-- gget integration for Ensembl/NCBI access
-- Sequence metadata extraction with multiple output formats
-- Docker containerization
-- Test coverage with pytest
-- Full documentation
-
-### ✅ Phase 2: Sequence Processing (COMPLETE)
-- 5 MCP tools for sequence QC, dereplication, masking, chimera detection
-- seqkit integration for QC and statistics
-- vsearch integration for clustering, DUST masking, UCHIME chimera detection
-- Unified pipeline orchestration tool
-- Docker containerization
-- Comprehensive testing guides with MCP Inspector
-- Test automation scripts
-
-### ✅ AG2 Multi-Agent System (COMPLETE)
-- MCPClientBridge for AG2 ↔ MCP communication
-- Multi-agent qPCR assistant system
-- Interactive chat interface with readline support
-- Comprehensive task logging (JSON + text summaries)
-- Docker Compose deployment
-- Multi-LLM support (Gemini 2.5 Flash Lite + GPT-4)
-- 1M token context window via Gemini
-
-### ✅ Testing Infrastructure (NEW)
-- MCP Inspector testing guide (comprehensive)
-- Quick reference cards for all tools
-- Automated test scripts
-- Both UI and CLI testing methods documented
-
-### 🔜 Phase 3: Alignment & Phylogenetics (NEXT)
-- MAFFT, MUSCLE, Clustal Omega alignment
-- CIAlign for alignment cleaning
-- Phylogenetic tree construction
-- Distance matrix calculation
-- Estimated: 4-5 weeks
-
-### 📋 Future Phases
-- Phase 4: Design & Primers (7-9 weeks)
-- Phase 5: Validation & Literature (4-5 weeks)
-- Phase 6: Export & Provenance (1-2 weeks)
-
-See **[docs/road_map.md](docs/road_map.md)** for complete timeline.
-
-## 🔧 Troubleshooting
-
-### Container Won't Start
-
-```bash
-# Check logs
-docker logs qpcr-assistant --tail 50
-
-# Verify API key
-cat autogen_app/.env | grep OPENAI_API_KEY
-
-# Rebuild from scratch
-docker compose -f docker-compose.autogen.yml down
-docker compose -f docker-compose.autogen.yml up --build -d
-```
-
-### No Tool Calls Made
-
-```bash
-# Verify MCP server connection
-docker logs qpcr-assistant 2>&1 | grep "MCP servers connected"
-
-# Check for tool call attempts
-docker logs qpcr-assistant 2>&1 | grep "ToolCall"
-
-# Test database server
-docker logs ndiag-database-server
-```
-
-### Workflow Fails with Token Limit Error
-
-**Error:** `RateLimitError: Requested 73859 tokens, Limit 10000`
-
-**Solution:** This is a known issue. Reduce sequence count in your request or wait for chunking implementation.
-
-### Can't Attach to Container
-
-```bash
-# Check if running
-docker ps | grep qpcr-assistant
-
-# Start if stopped
-docker compose -f docker-compose.autogen.yml up -d
-
-# Attach
-docker attach qpcr-assistant
-```
-
-## 📞 Support
-
-- **Documentation**: Check [docs/](docs/) folder
-- **Issues**: [GitHub Issues](https://github.com/acefgin/mdk_mcp/issues)
-- **Task Logs**: Check `/results` directory in container
+**For Developers:**
 - **Claude Code**: See [CLAUDE.md](CLAUDE.md) for AI assistant guidance
+- **Architecture**: Review [docs/AUTOGEN_INTEGRATION.md](docs/AUTOGEN_INTEGRATION.md)
+- **Testing**: See [docs/MCP_TESTING_GUIDE.md](docs/MCP_TESTING_GUIDE.md)
 
 ## 📄 License
 
