@@ -1,0 +1,64 @@
+{
+  "name": "ndiag-alignment-server",
+  "version": "0.1.0",
+  "description": "MCP server for sequence alignment and phylogenetic analysis",
+  "author": "Neglected Diagnostics MCP Team",
+  "license": "MIT",
+  "transport": "stdio",
+  "container": {
+    "image": "ndiag-alignment-server:latest",
+    "dockerfile": "./Dockerfile"
+  },
+  "capabilities": {
+    "tools": [
+      {
+        "name": "align_sequences",
+        "description": "Align sequences using MAFFT, MUSCLE, Clustal Omega, or gget_muscle"
+      },
+      {
+        "name": "process_alignment",
+        "description": "Process and clean alignment using CIAlign with gap removal and quality assessment"
+      },
+      {
+        "name": "build_phylogeny",
+        "description": "Build phylogenetic tree using NJ, ML, or MP methods"
+      },
+      {
+        "name": "calculate_distances",
+        "description": "Calculate pairwise distance matrix from alignment"
+      },
+      {
+        "name": "align_and_analyze",
+        "description": "Complete pipeline: align, process, and optionally build phylogeny"
+      }
+    ]
+  },
+  "configuration": {
+    "env": {
+      "LOG_LEVEL": "INFO",
+      "TEMP_DIR": "/tmp/mcp_alignment",
+      "DEFAULT_MAFFT_STRATEGY": "auto",
+      "DEFAULT_MAX_ITERATIONS": "1000",
+      "DEFAULT_GAP_THRESHOLD": "0.5",
+      "DEFAULT_PHYLO_METHOD": "nj",
+      "DEFAULT_BOOTSTRAP": "100",
+      "DEFAULT_DISTANCE_MODEL": "kimura"
+    }
+  },
+  "dependencies": {
+    "system": [
+      "mafft>=7.0",
+      "muscle>=5.0",
+      "clustalo>=1.2"
+    ],
+    "python": [
+      "mcp>=0.9.0",
+      "biopython>=1.81",
+      "gget>=0.28.0",
+      "numpy>=1.24.0",
+      "ete3>=3.1.2",
+      "dendropy>=4.6.0",
+      "cialign>=1.0.0"
+    ]
+  }
+}

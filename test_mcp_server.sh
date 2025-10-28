@@ -1,6 +1,6 @@
 #!/bin/bash
 # MCP Server Docker Test Script with Inspector Launch
-# Usage: ./test_mcp_server.sh [database|processing]
+# Usage: ./test_mcp_server.sh [database|processing|alignment]
 
 set -e
 
@@ -38,9 +38,14 @@ case "$SERVER_TYPE" in
     CONTAINER_NAME="ndiag-processing-server"
     SERVER_SCRIPT="/app/processing_mcp_server.py"
     ;;
+  alignment)
+    SERVER_DIR="mcp_servers/alignment_server"
+    CONTAINER_NAME="ndiag-alignment-server"
+    SERVER_SCRIPT="/app/alignment_mcp_server.py"
+    ;;
   *)
     echo -e "${RED}✗ Unknown server: $SERVER_TYPE${RESET}"
-    echo "Usage: $0 [database|processing]"
+    echo "Usage: $0 [database|processing|alignment]"
     exit 1
     ;;
 esac
