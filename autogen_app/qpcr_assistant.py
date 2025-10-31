@@ -528,6 +528,11 @@ class QPCRAssistant:
             artifact_type: Type of artifact (e.g., "sequences", "alignment", "tree")
             metadata: Additional metadata for the artifact
         """
+        # Skip if manifest not initialized yet (before run_workflow starts)
+        if not self.manifest or "phases" not in self.manifest:
+            logger.debug(f"Manifest not initialized yet - skipping artifact tracking for {phase}/{artifact_type}")
+            return
+            
         if phase not in self.manifest["phases"]:
             logger.warning(f"Unknown phase '{phase}' - cannot update manifest")
             return
@@ -705,13 +710,18 @@ class QPCRAssistant:
         phase = phase_mapping.get(category, "phase1")
 
         # Use run_id directory if available, otherwise fall back to legacy structure
-        if self.run_dir:
+        if self.run_dir and os.path.isdir(self.run_dir):
             category_folder = os.path.join(self.run_dir, phase)
         else:
-            # Legacy path for backward compatibility
+            # Legacy path for backward compatibility (when run_workflow hasn't been called yet)
+            logger.debug(f"Using legacy path for {category}, run_dir not available")
             category_folder = os.path.join(self.log_dir, category)
 
-        os.makedirs(category_folder, exist_ok=True)
+        try:
+            os.makedirs(category_folder, exist_ok=True)
+        except Exception as e:
+            logger.error(f"Failed to create directory {category_folder}: {e}")
+            raise
 
         # Sanitize taxon name for filename
         safe_taxon = re.sub(r'[^\w\s-]', '', taxon).replace(' ', '_')
@@ -726,19 +736,22 @@ class QPCRAssistant:
         # Count sequences
         seq_count = sequences.count(">")
 
-        # Update manifest if run_id is active
-        if self.run_dir:
-            self._update_manifest_artifact(
-                phase=phase,
-                artifact_path=filepath,
-                artifact_type="sequences",
-                metadata={
-                    "taxon": taxon,
-                    "region": region,
-                    "category": category,
-                    "sequence_count": seq_count
-                }
-            )
+        # Update manifest if run_id is active and manifest is initialized
+        if self.run_dir and self.manifest and "phases" in self.manifest:
+            try:
+                self._update_manifest_artifact(
+                    phase=phase,
+                    artifact_path=filepath,
+                    artifact_type="sequences",
+                    metadata={
+                        "taxon": taxon,
+                        "region": region,
+                        "category": category,
+                        "sequence_count": seq_count
+                    }
+                )
+            except Exception as e:
+                logger.warning(f"Failed to update manifest for {filepath}: {e}")
 
         # Update or create README
         self._update_readme(category_folder, safe_taxon, region, filename, seq_count)
@@ -772,7 +785,8 @@ class QPCRAssistant:
             region=region,
             filename=filename,
             seq_count=seq_count,
-            folder=folder
+            folder=folder,
+            run_id=self.run_id or "unknown"  # Use "unknown" if run_id not yet generated
         )
 
         with open(readme_path, 'w') as f:
@@ -791,44 +805,88 @@ class QPCRAssistant:
                     # CRITICAL: For get_sequences, we need the FULL result before summarization
                     # So we call the MCP bridge directly and handle summarization ourselves
                     if func_name == "get_sequences":
+                        logger.debug(f"[WRAPPER] Starting get_sequences, run_id={self.run_id}, run_dir={self.run_dir}")
+                        
                         # Get full result directly from MCP bridge (no summarization)
                         full_result = self.event_loop.run_until_complete(
                             self.mcp_executor._call_mcp_tool_raw(func_name, kwargs)
                         )
+                        logger.debug(f"[WRAPPER] Got MCP result, length={len(str(full_result))}")
                         
                         # Log the tool call (with full result)
+                        logger.debug("[WRAPPER] About to log tool call")
                         self.task_logger.log_tool_call(
                             "DatabaseAgent",
                             func_name,
                             kwargs,
                             full_result
                         )
+                        logger.debug("[WRAPPER] Logged tool call")
                         
                         # Save to file and return metadata only
+                        logger.debug("[WRAPPER] About to handle sequence result")
                         result = self._handle_sequence_result(full_result, kwargs)
+                        logger.debug(f"[WRAPPER] Handled sequence result, returning summary")
                         return result
                     
+                    # For processing and alignment tools, get RAW result before summarization
+                    # so we can extract file paths from JSON
+                    if func_name in ["process_sequences", "fasta_qc", "dereplicate_sequences", 
+                                     "mask_low_complexity", "detect_chimeras",
+                                     "align_sequences", "align_and_analyze", "build_phylogeny", 
+                                     "process_alignment", "calculate_distances"]:
+                        # Inject run_id into processing tool calls for proper file organization
+                        if func_name in ["process_sequences", "fasta_qc", "dereplicate_sequences", 
+                                        "mask_low_complexity", "detect_chimeras"] and self.run_id:
+                            kwargs_with_run_id = {**kwargs, "run_id": self.run_id}
+                            logger.debug(f"[WRAPPER] Injecting run_id={self.run_id} into {func_name}")
+                        else:
+                            kwargs_with_run_id = kwargs
+                        
+                        # Get full RAW result (no summarization)
+                        raw_result = self.event_loop.run_until_complete(
+                            self.mcp_executor._call_mcp_tool_raw(func_name, kwargs_with_run_id)
+                        )
+                        
+                        # Log the tool call with full result
+                        self.task_logger.log_tool_call(
+                            "AnalystAgent",  # These are AnalystAgent tools
+                            func_name,
+                            kwargs,
+                            raw_result
+                        )
+                        
+                        # Handle the result to extract file paths and update manifest
+                        if func_name in ["process_sequences", "fasta_qc", "dereplicate_sequences", 
+                                        "mask_low_complexity", "detect_chimeras"]:
+                            result = self._handle_processing_tool_result(raw_result, kwargs, func_name)
+                        else:
+                            result = self._handle_alignment_tool_result(raw_result, kwargs, func_name)
+                    
                     # For other functions, use normal flow with summarization
-                    result = self.event_loop.run_until_complete(
-                        self.mcp_executor.execute_function(func_name, kwargs)
-                    )
+                    else:
+                        result = self.event_loop.run_until_complete(
+                            self.mcp_executor.execute_function(func_name, kwargs)
+                        )
 
-                    # Log the tool call
-                    self.task_logger.log_tool_call(
-                        "DatabaseAgent",
-                        func_name,
-                        kwargs,
-                        result
-                    )
+                        # Log the tool call
+                        self.task_logger.log_tool_call(
+                            "DatabaseAgent",
+                            func_name,
+                            kwargs,
+                            result
+                        )
 
-                    # For extract_sequence_columns, limit output
-                    if func_name == "extract_sequence_columns":
-                        result = self._handle_metadata_result(result, kwargs)
+                        # For extract_sequence_columns, limit output
+                        if func_name == "extract_sequence_columns":
+                            result = self._handle_metadata_result(result, kwargs)
 
                     return result
                 except Exception as e:
+                    import traceback
                     error_msg = f"Error calling {func_name}: {str(e)}"
                     logger.error(error_msg)
+                    logger.error(f"Full traceback:\n{traceback.format_exc()}")
                     return error_msg
 
             return wrapper
@@ -994,6 +1052,568 @@ Do NOT request the full sequence content - it's already saved."""
             return result[:3000] + f"\n\n... [Truncated: {len(result) - 3000} more characters]"
 
         return result
+
+    def _handle_mcp_file_result(self, result: str, kwargs: dict, tool_config: Dict[str, Any]) -> str:
+        """
+        Generic handler for MCP tool results that export files.
+        Parses JSON output, extracts file paths, updates manifest, and returns formatted summary.
+        
+        Args:
+            result: JSON result from MCP tool (may be wrapped in MCP response format)
+            kwargs: Original function arguments
+            tool_config: Configuration dictionary with:
+                - phase: Workflow phase (e.g., "phase1", "phase2", "phase3")
+                - output_fields: List of field names to extract from JSON (e.g., ["output_file"])
+                  or dict mapping field names to artifact types (e.g., {"alignment_file": "alignment"})
+                - log_prefix: Prefix for log messages (e.g., "PROCESSING", "ALIGNMENT")
+                - summary_template: Function that generates summary message from extracted data
+        
+        Returns:
+            Summary message with actual output file paths for agents to use
+        """
+        if not result or (isinstance(result, str) and result.startswith("Error")):
+            return result
+        
+        try:
+            import json
+            import os
+            
+            # Extract actual JSON from MCP response wrapper if needed
+            # MCP returns: {'content': [{'type': 'text', 'text': 'JSON DATA'}], 'isError': False}
+            actual_json = result
+            if isinstance(result, dict):
+                # Already a dict - check if it's MCP-wrapped
+                if 'content' in result and isinstance(result['content'], list):
+                    if len(result['content']) > 0 and 'text' in result['content'][0]:
+                        actual_json = result['content'][0]['text']
+            elif isinstance(result, str) and result.startswith('{'):
+                # Try to parse as JSON
+                try:
+                    temp_parsed = json.loads(result)
+                    if isinstance(temp_parsed, dict) and 'content' in temp_parsed:
+                        # MCP-wrapped
+                        if isinstance(temp_parsed['content'], list) and len(temp_parsed['content']) > 0:
+                            if 'text' in temp_parsed['content'][0]:
+                                actual_json = temp_parsed['content'][0]['text']
+                    else:
+                        actual_json = result
+                except:
+                    pass
+            
+            # Parse the actual JSON content
+            if isinstance(actual_json, str):
+                parsed = json.loads(actual_json) if actual_json.startswith('{') else None
+            elif isinstance(actual_json, dict):
+                parsed = actual_json
+            else:
+                return result
+                
+            if not parsed or not isinstance(parsed, dict):
+                return result
+            
+            phase = tool_config.get("phase", "phase1")
+            log_prefix = tool_config.get("log_prefix", "MCP")
+            output_fields = tool_config.get("output_fields", {})
+            
+            # Extract output files
+            # Support both list format ["output_file"] and dict format {"alignment_file": "alignment"}
+            if isinstance(output_fields, list):
+                # Convert list to dict with generic artifact type
+                output_fields = {field: "output" for field in output_fields}
+            
+            extracted_files = []
+            for field_name, artifact_type in output_fields.items():
+                file_path = parsed.get(field_name)
+                if file_path and os.path.exists(file_path):
+                    extracted_files.append({
+                        "field": field_name,
+                        "path": file_path,
+                        "type": artifact_type
+                    })
+                elif file_path:
+                    logger.warning(f"[{log_prefix}] Output file doesn't exist: {file_path}")
+            
+            if not extracted_files:
+                logger.warning(f"[{log_prefix}] No valid output files found in result")
+                return result
+            
+            # Extract taxon from input filename if available
+            input_file = kwargs.get("fasta_file", "unknown")
+            taxon = self._extract_taxon_from_filename(input_file)
+            
+            # Filter out large FASTA/alignment content to prevent log and manifest bloat
+            # These fields contain full sequence data and can be massive (>100KB)
+            large_content_fields = ["alignment", "processed_fasta", "fasta_content", "sequences", "content", "text"]
+            
+            # Update manifest for each output file
+            if self.run_dir and self.manifest and "phases" in self.manifest:
+                for file_info in extracted_files:
+                    try:
+                        # Build metadata from kwargs and parsed result
+                        # Exclude large content fields and file path fields from metadata
+                        excluded_fields = set(output_fields.keys()) | set(large_content_fields)
+                        metadata = {
+                            "input_file": input_file,
+                            "taxon": taxon,
+                            **{k: v for k, v in kwargs.items() if k not in ["fasta_file"]},
+                            **{k: v for k, v in parsed.items() if k not in excluded_fields and not k.endswith("_file")}
+                        }
+                        
+                        self._update_manifest_artifact(
+                            phase=phase,
+                            artifact_path=file_info["path"],
+                            artifact_type=file_info["type"],
+                            metadata=metadata
+                        )
+                        logger.info(f"[{log_prefix}] Updated manifest with {file_info['type']} artifact: {file_info['path']}")
+                    except Exception as e:
+                        logger.warning(f"[{log_prefix}] Failed to update manifest for {file_info['type']}: {e}")
+            
+            # Generate summary using template function
+            summary_template = tool_config.get("summary_template")
+            if summary_template and callable(summary_template):
+                return summary_template(parsed, kwargs, extracted_files)
+            
+            # Default summary if no template provided
+            return self._format_default_summary(parsed, kwargs, extracted_files, log_prefix)
+            
+        except Exception as e:
+            logger.error(f"[{tool_config.get('log_prefix', 'MCP')}] Error handling MCP result: {e}")
+            return result
+    
+    def _parse_mcp_json(self, result: str) -> Optional[Dict]:
+        """
+        Lightweight JSON parser for MCP responses.
+        Handles both raw JSON and MCP-wrapped responses.
+        
+        Args:
+            result: JSON string or MCP-wrapped response
+        
+        Returns:
+            Parsed dictionary or None if parsing fails
+        """
+        import json
+        
+        try:
+            # If already a dict, check if MCP-wrapped
+            if isinstance(result, dict):
+                if 'content' in result and isinstance(result['content'], list):
+                    if len(result['content']) > 0 and 'text' in result['content'][0]:
+                        result = result['content'][0]['text']
+                    else:
+                        return result
+                else:
+                    return result
+            
+            # Parse string as JSON
+            if isinstance(result, str) and result.startswith('{'):
+                parsed = json.loads(result)
+                
+                # Check if MCP-wrapped
+                if isinstance(parsed, dict) and 'content' in parsed:
+                    if isinstance(parsed['content'], list) and len(parsed['content']) > 0:
+                        if 'text' in parsed['content'][0]:
+                            # Re-parse the inner text
+                            inner_text = parsed['content'][0]['text']
+                            if isinstance(inner_text, str) and inner_text.startswith('{'):
+                                return json.loads(inner_text)
+                            return {"text": inner_text}
+                
+                return parsed
+            
+        except json.JSONDecodeError as e:
+            logger.debug(f"JSON parse failed: {e}")
+        except Exception as e:
+            logger.debug(f"Unexpected error parsing JSON: {e}")
+        
+        return None
+    
+    def _extract_taxon_from_filename(self, filename: str) -> str:
+        """
+        Extract taxon name from filename.
+        Assumes format like "Salmo_salar_COI_20251031.fasta".
+        
+        Args:
+            filename: Input file path or name
+        
+        Returns:
+            Taxon name (e.g., "Salmo_salar") or "unknown"
+        """
+        import os
+        basename = os.path.basename(filename)
+        if "_" in basename:
+            parts = basename.split("_")
+            if len(parts) >= 2:
+                return f"{parts[0]}_{parts[1]}"
+        return "unknown"
+    
+    def _format_default_summary(self, parsed: Dict, kwargs: Dict, files: List[Dict], prefix: str) -> str:
+        """
+        Format a default summary message when no custom template is provided.
+        
+        Args:
+            parsed: Parsed JSON result
+            kwargs: Original function arguments
+            files: List of extracted file info dicts
+            prefix: Log prefix for context
+        
+        Returns:
+            Formatted summary message
+        """
+        summary_parts = [f"✓ {prefix} complete!"]
+        summary_parts.append(f"\n**Input:** {kwargs.get('fasta_file', 'unknown')}")
+        
+        for file_info in files:
+            summary_parts.append(f"\n**{file_info['type'].replace('_', ' ').title()}:** {file_info['path']}")
+        
+        summary_parts.append("\n\n**IMPORTANT:** Use these exact paths for next steps.")
+        
+        return ''.join(summary_parts)
+    
+    def _get_tool_config(self, tool_name: str) -> Dict[str, Any]:
+        """
+        Get configuration for a specific MCP tool.
+        Returns config dict with phase, output_fields, log_prefix, and optional summary_template.
+        
+        Args:
+            tool_name: Name of the MCP tool (e.g., "process_sequences", "align_and_analyze")
+        
+        Returns:
+            Configuration dictionary for the tool
+        """
+        # Processing tools configuration
+        if tool_name == "process_sequences":
+            def processing_summary(parsed: Dict, kwargs: Dict, files: List[Dict]) -> str:
+                sequences_in = parsed.get("sequences_in", "unknown")
+                sequences_out = parsed.get("sequences_out", "unknown")
+                pipeline = kwargs.get("pipeline", [])
+                output_file = files[0]["path"] if files else "unknown"
+                
+                return f"""✓ Processing complete!
+
+**Input:** {kwargs.get('fasta_file', 'unknown')}
+**Output:** {output_file}
+
+**Pipeline:** {' → '.join(pipeline)}
+**Sequences:** {sequences_in} → {sequences_out}
+
+**IMPORTANT:** Use this exact path for next steps:
+{output_file}
+
+The processed sequences are ready for alignment and phylogenetic analysis."""
+            
+            return {
+                "phase": "phase2",
+                "output_fields": {"output_file": "processed_sequences"},
+                "log_prefix": "PROCESSING",
+                "summary_template": processing_summary
+            }
+        
+        elif tool_name in ["fasta_qc", "dereplicate_sequences", "mask_low_complexity", "detect_chimeras"]:
+            # Individual processing tools - use simple config
+            tool_labels = {
+                "fasta_qc": "QC",
+                "dereplicate_sequences": "DEREPLICATION",
+                "mask_low_complexity": "MASKING",
+                "detect_chimeras": "CHIMERA_DETECTION"
+            }
+            return {
+                "phase": "phase2",
+                "output_fields": {"output_file": tool_name.replace("_", "-")},
+                "log_prefix": tool_labels.get(tool_name, tool_name.upper())
+            }
+        
+        # Alignment tools configuration
+        elif tool_name in ["align_sequences", "align_and_analyze"]:
+            def alignment_summary(parsed: Dict, kwargs: Dict, files: List[Dict]) -> str:
+                algorithm = kwargs.get("algorithm", "unknown")
+                summary_parts = [f"✓ Alignment and analysis complete using {algorithm}!"]
+                summary_parts.append(f"\n**Input:** {kwargs.get('fasta_file', 'unknown')}")
+                
+                file_labels = {
+                    "alignment": "Alignment file",
+                    "phylogeny": "Phylogenetic tree",
+                    "distances": "Distance matrix"
+                }
+                
+                for file_info in files:
+                    label = file_labels.get(file_info["type"], file_info["type"])
+                    summary_parts.append(f"\n**{label}:** {file_info['path']}")
+                
+                summary_parts.append("\n\n**IMPORTANT:** Use these exact paths for primer design steps.")
+                summary_parts.append("\nThe aligned sequences and phylogenetic analysis are ready for identifying signature regions.")
+                
+                return ''.join(summary_parts)
+            
+            return {
+                "phase": "phase3",
+                "output_fields": {
+                    "alignment_file": "alignment",
+                    "tree_file": "phylogeny",
+                    "distance_file": "distances"
+                },
+                "log_prefix": "ALIGNMENT",
+                "summary_template": alignment_summary
+            }
+        
+        elif tool_name == "build_phylogeny":
+            return {
+                "phase": "phase3",
+                "output_fields": {"tree_file": "phylogeny"},
+                "log_prefix": "PHYLOGENY"
+            }
+        
+        elif tool_name == "calculate_distances":
+            return {
+                "phase": "phase3",
+                "output_fields": {"distance_file": "distances"},
+                "log_prefix": "DISTANCES"
+            }
+        
+        elif tool_name == "process_alignment":
+            return {
+                "phase": "phase3",
+                "output_fields": {"output_file": "processed_alignment"},
+                "log_prefix": "ALIGNMENT_PROCESSING"
+            }
+        
+        # Default config for unknown tools
+        else:
+            return {
+                "phase": "phase1",
+                "output_fields": {"output_file": "output"},
+                "log_prefix": tool_name.upper()
+            }
+    
+    def _handle_processing_tool_result(self, result: str, kwargs: dict, tool_name: str) -> str:
+        """
+        Lightweight handler for processing tool results.
+        
+        Processing server saves files natively and returns paths in JSON.
+        This handler just extracts paths, updates manifest, and returns summary.
+        
+        Args:
+            result: JSON result from processing tool with output_file path
+            kwargs: Original function arguments
+            tool_name: Name of the tool being handled
+        
+        Returns:
+            Formatted summary message
+        """
+        if not result or (isinstance(result, str) and result.startswith("Error")):
+            return result
+        
+        try:
+            import json
+            import os
+            
+            # Quick JSON parse - processing server returns simple structure
+            parsed = self._parse_mcp_json(result)
+            if not parsed or not isinstance(parsed, dict):
+                return result
+            
+            # Extract output file path
+            output_file = parsed.get("output_file")
+            if not output_file:
+                logger.warning(f"[PROCESSING] No output_file in {tool_name} result")
+                return result
+            
+            # Verify file exists
+            if not os.path.exists(output_file):
+                logger.error(f"[PROCESSING] Output file doesn't exist: {output_file}")
+                return f"Error: Processing completed but output file not found: {output_file}"
+            
+            # Update manifest (lightweight - just track the file)
+            if self.run_dir and self.manifest and "phases" in self.manifest:
+                input_file = kwargs.get("fasta_file", "unknown")
+                taxon = self._extract_taxon_from_filename(input_file)
+                
+                # Minimal metadata - no large content fields
+                # Extract sequence counts from stats (MCP server returns stats.input_sequences/output_sequences)
+                stats = parsed.get("stats", {})
+                metadata = {
+                    "input_file": input_file,
+                    "taxon": taxon,
+                    "sequences_in": stats.get("input_sequences", parsed.get("sequences_in")),
+                    "sequences_out": stats.get("output_sequences", parsed.get("sequences_out")),
+                    "pipeline": kwargs.get("pipeline", [])
+                }
+                
+                self._update_manifest_artifact(
+                    phase="phase2",
+                    artifact_path=output_file,
+                    artifact_type="processed_sequences",
+                    metadata=metadata
+                )
+                logger.info(f"[PROCESSING] Tracked {output_file} in manifest")
+            
+            # Generate lightweight summary
+            # Extract sequence counts from stats object (MCP server returns stats.input_sequences/output_sequences)
+            stats = parsed.get("stats", {})
+            sequences_in = stats.get("input_sequences", parsed.get("sequences_in", "unknown"))
+            sequences_out = stats.get("output_sequences", parsed.get("sequences_out", "unknown"))
+            pipeline = kwargs.get("pipeline", [])
+            
+            summary = f"""✓ Processing complete!
+
+**Input:** {kwargs.get('fasta_file', 'unknown')}
+**Output:** {output_file}
+
+**Pipeline:** {' → '.join(pipeline) if pipeline else 'default'}
+**Sequences:** {sequences_in} → {sequences_out}
+
+**IMPORTANT:** Use this exact path for next steps:
+{output_file}
+
+The processed sequences are ready for alignment and phylogenetic analysis."""
+            
+            return summary
+            
+        except Exception as e:
+            logger.error(f"[PROCESSING] Error handling {tool_name} result: {e}")
+            return result
+    
+    def _handle_alignment_tool_result(self, result: str, kwargs: dict, tool_name: str) -> str:
+        """
+        Handle alignment tool results by saving data to files and returning summary.
+        
+        Unlike processing tools that return file paths, alignment tools return data
+        (alignment content, distance matrices, phylogenetic trees) that we need to save.
+        
+        Args:
+            result: JSON result from alignment tool with data fields
+            kwargs: Original function arguments
+            tool_name: Tool name (e.g., "align_and_analyze")
+        
+        Returns:
+            Summary message with file paths for agents to use
+        """
+        import json
+        import os
+        from datetime import datetime
+        
+        if not result or (isinstance(result, str) and result.startswith("Error")):
+            return result
+        
+        try:
+            # Parse MCP-wrapped JSON
+            actual_json = result
+            if isinstance(result, dict) and 'content' in result:
+                if len(result['content']) > 0 and 'text' in result['content'][0]:
+                    actual_json = result['content'][0]['text']
+            elif isinstance(result, str) and result.startswith('{'):
+                temp_parsed = json.loads(result)
+                if isinstance(temp_parsed, dict) and 'content' in temp_parsed:
+                    if len(temp_parsed['content']) > 0 and 'text' in temp_parsed['content'][0]:
+                        actual_json = temp_parsed['content'][0]['text']
+            
+            if isinstance(actual_json, str):
+                parsed = json.loads(actual_json)
+            else:
+                parsed = actual_json
+            
+            if not isinstance(parsed, dict) or not parsed.get("success"):
+                return result
+            
+            # Determine save location based on run_dir
+            if self.run_dir:
+                phase_dir = os.path.join(self.run_dir, "phase3")
+                os.makedirs(phase_dir, exist_ok=True)
+            else:
+                phase_dir = "/results/alignments"
+                os.makedirs(phase_dir, exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            input_file = kwargs.get("fasta_file", "unknown")
+            taxon = self._extract_taxon_from_filename(input_file)
+            
+            saved_files = []
+            
+            # Save alignment if present
+            if "alignment" in parsed and isinstance(parsed["alignment"], str):
+                alignment_file = os.path.join(phase_dir, f"{taxon}_alignment_{timestamp}.fasta")
+                with open(alignment_file, 'w') as f:
+                    f.write(parsed["alignment"])
+                saved_files.append({"path": alignment_file, "type": "alignment", "field": "alignment"})
+                logger.info(f"[ALIGNMENT] Saved alignment to: {alignment_file}")
+            
+            # Save phylogeny if present  
+            if "phylogeny" in parsed and isinstance(parsed["phylogeny"], dict):
+                tree_file = os.path.join(phase_dir, f"{taxon}_tree_{timestamp}.nwk")
+                tree_content = parsed["phylogeny"].get("tree", parsed["phylogeny"].get("newick", ""))
+                if tree_content:
+                    with open(tree_file, 'w') as f:
+                        f.write(tree_content)
+                    saved_files.append({"path": tree_file, "type": "phylogeny", "field": "phylogeny"})
+                    logger.info(f"[ALIGNMENT] Saved phylogeny to: {tree_file}")
+            
+            # Save distance matrix if present
+            if "distances" in parsed and isinstance(parsed["distances"], dict):
+                distance_file = os.path.join(phase_dir, f"{taxon}_distances_{timestamp}.json")
+                with open(distance_file, 'w') as f:
+                    json.dump(parsed["distances"], f, indent=2)
+                saved_files.append({"path": distance_file, "type": "distances", "field": "distances"})
+                logger.info(f"[ALIGNMENT] Saved distances to: {distance_file}")
+            
+            if not saved_files:
+                logger.warning("[ALIGNMENT] No alignment data found in result")
+                return result
+            
+            # Update manifest
+            if self.run_dir and self.manifest and "phases" in self.manifest:
+                for file_info in saved_files:
+                    try:
+                        # Build metadata (exclude large content fields)
+                        large_fields = ["alignment", "phylogeny", "distances", "processed_fasta", "fasta_content"]
+                        metadata = {
+                            "input_file": input_file,
+                            "taxon": taxon,
+                            **{k: v for k, v in kwargs.items() if k not in ["fasta_file", "fasta_content"]},
+                            **{k: v for k, v in parsed.items() if k not in large_fields and not k.endswith("_content")}
+                        }
+                        
+                        self._update_manifest_artifact(
+                            phase="phase3",
+                            artifact_path=file_info["path"],
+                            artifact_type=file_info["type"],
+                            metadata=metadata
+                        )
+                    except Exception as e:
+                        logger.warning(f"[ALIGNMENT] Failed to update manifest: {e}")
+            
+            # Generate summary
+            algorithm = kwargs.get("algorithm", "unknown")
+            summary_parts = [f"✓ Alignment and analysis complete using {algorithm}!"]
+            summary_parts.append(f"\n**Input:** {input_file}")
+            
+            file_labels = {
+                "alignment": "Alignment file",
+                "phylogeny": "Phylogenetic tree",
+                "distances": "Distance matrix"
+            }
+            
+            for file_info in saved_files:
+                label = file_labels.get(file_info["type"], file_info["type"])
+                summary_parts.append(f"\n**{label}:** {file_info['path']}")
+            
+            # Add statistics summary
+            if "alignment_statistics" in parsed:
+                stats = parsed["alignment_statistics"]
+                summary_parts.append(f"\n\n**Alignment Statistics:**")
+                summary_parts.append(f"- Sequences: {stats.get('num_sequences', 'unknown')}")
+                summary_parts.append(f"- Length: {stats.get('alignment_length', 'unknown')}bp")
+                summary_parts.append(f"- Average conservation: {stats.get('average_conservation', 0):.1%}")
+            
+            summary_parts.append("\n\n**IMPORTANT:** Use these exact paths for primer design steps.")
+            summary_parts.append("\nThe aligned sequences and phylogenetic analysis are ready for identifying signature regions.")
+            
+            return ''.join(summary_parts)
+            
+        except Exception as e:
+            logger.error(f"[ALIGNMENT] Error handling alignment result: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return result
 
     def _create_function_maps(self, mcp_functions: Dict[str, Callable]) -> Dict[str, Dict[str, Callable]]:
         """
@@ -1372,6 +1992,30 @@ Do NOT request the full sequence content - it's already saved."""
         # Parse intent footer from message
         intent_info = self._parse_intent_footer(content, sender)
 
+        # CRITICAL: Detect empty messages from User (AutoGen loop bug)
+        # When Coordinator sends TERMINATE, AutoGen may select User with empty message
+        # This causes an infinite loop - terminate immediately when User has no content
+        if sender == "User" and not content:
+            logger.warning("[TERMINATION] Detected empty User message - forcing termination to prevent loop")
+            self._log_termination_reason("EMPTY_USER_MESSAGE", "Empty message from User after TERMINATE", sender)
+            return True
+
+        # CRITICAL: Check if TERMINATE was sent in recent messages (AutoGen loop bug)
+        # If Coordinator sent TERMINATE recently and another agent is now speaking, terminate immediately
+        # This catches the race condition where speaker selection happens before termination check
+        if sender != "Coordinator" and hasattr(self, 'groupchat') and self.groupchat and len(self.groupchat.messages) > 1:
+            # Check last 3 messages for TERMINATE from Coordinator
+            recent_messages = self.groupchat.messages[-3:]
+            for msg in recent_messages:
+                if (isinstance(msg, dict) and 
+                    msg.get("name") == "Coordinator" and 
+                    msg.get("content", "").rstrip().endswith("TERMINATE")):
+                    logger.warning(f"[TERMINATION] Coordinator sent TERMINATE recently, but {sender} is trying to respond")
+                    logger.warning(f"  This is the AutoGen GroupChat bug - speaker selected after TERMINATE")
+                    logger.warning(f"  FORCING TERMINATION to prevent loop")
+                    self._log_termination_reason("TERMINATE_AFTER_COORDINATOR", f"Agent {sender} selected after Coordinator TERMINATE", sender)
+                    return True
+
         # CRITICAL: Check if message contains a function call (work is continuing)
         # AutoGen/AG2 stores function calls in 'function_call' or 'tool_calls' field
         if message.get("function_call") or message.get("tool_calls"):
@@ -1431,6 +2075,22 @@ Do NOT request the full sequence content - it's already saved."""
                 logger.warning(f"[SECURITY] Non-Coordinator agent '{sender}' attempted to TERMINATE - REJECTING")
                 logger.warning(f"  Only Coordinator can issue TERMINATE to prevent premature workflow termination")
                 return False
+            
+            # Check if this is a repeated TERMINATE (AutoGen loop bug)
+            if hasattr(self, 'groupchat') and self.groupchat and len(self.groupchat.messages) > 2:
+                recent_messages = self.groupchat.messages[-5:]  # Check last 5 messages
+                terminate_count = sum(1 for msg in recent_messages 
+                                     if isinstance(msg, dict) 
+                                     and msg.get("content", "").rstrip().endswith("TERMINATE")
+                                     and msg.get("name") == "Coordinator")
+                
+                if terminate_count > 1:
+                    logger.error(f"[TERMINATION] Coordinator sent TERMINATE {terminate_count} times in last 5 messages!")
+                    logger.error(f"  This indicates AutoGen GroupChat is not respecting termination signal")
+                    logger.error(f"  FORCING TERMINATION to break infinite loop")
+                    self._log_termination_reason("REPEATED_TERMINATE", f"TERMINATE sent {terminate_count} times", sender)
+                    return True
+            
             logger.info(f"Explicit termination message detected from Coordinator: 'TERMINATE'")
             self._log_termination_reason("EXPLICIT_TERMINATE", content, sender)
             return True
@@ -1878,6 +2538,17 @@ Do NOT request the full sequence content - it's already saved."""
         if termination_reason == "EXPLICIT_TERMINATE":
             summary["next_steps"].append("Review the generated data files in /results/ directory")
             summary["next_steps"].append("Proceed with experimental validation of recommended primers")
+        elif termination_reason == "REPEATED_TERMINATE":
+            summary["next_steps"].append("⚠️  Conversation terminated due to repeated TERMINATE messages (AutoGen loop bug)")
+            summary["next_steps"].append("Review results in /results/ directory - workflow likely completed successfully")
+            summary["next_steps"].append("If workflow incomplete, restart with clearer objectives")
+        elif termination_reason == "TERMINATE_AFTER_COORDINATOR":
+            summary["next_steps"].append("⚠️  Agent attempted to respond after Coordinator TERMINATE (AutoGen loop bug)")
+            summary["next_steps"].append("Review results in /results/ directory - workflow likely completed successfully")
+            summary["next_steps"].append("This is expected behavior when AutoGen selects speakers before checking termination")
+        elif termination_reason == "EMPTY_USER_MESSAGE":
+            summary["next_steps"].append("⚠️  Conversation terminated due to empty User message after TERMINATE")
+            summary["next_steps"].append("Review results in /results/ directory - workflow likely completed")
         elif termination_reason == "TASK_COMPLETION":
             summary["next_steps"].append("Data collection phase completed successfully")
             summary["next_steps"].append("Ready to advance to primer design and validation phase")
@@ -1908,6 +2579,9 @@ Do NOT request the full sequence content - it's already saved."""
         reason_colors = {
             "EXPLICIT_TERMINATE": Colors.GREEN,
             "TASK_COMPLETION": Colors.GREEN,
+            "REPEATED_TERMINATE": Colors.YELLOW,  # Warning but likely successful
+            "TERMINATE_AFTER_COORDINATOR": Colors.YELLOW,  # Warning but likely successful
+            "EMPTY_USER_MESSAGE": Colors.YELLOW,  # Warning but likely successful
             "ERROR_CONDITION": Colors.RED,
             "MAX_ROUNDS_APPROACHING": Colors.YELLOW,
             "MAX_ROUNDS_REACHED": Colors.YELLOW,

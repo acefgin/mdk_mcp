@@ -577,6 +577,7 @@ async def detect_chimeras_impl(
 
 async def process_sequences_impl(
     fasta_content: str,
+    run_id: str = None,
     pipeline: List[str] = None,
     qc_params: Dict[str, Any] = None,
     derep_params: Dict[str, Any] = None,
@@ -674,12 +675,21 @@ async def process_sequences_impl(
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 output_filename = f"processed_sequences{pipeline_suffix}_{timestamp}.fasta"
                 
-                # Use /results/sequences directory (shared across MCP servers)
+                # Determine output directory based on run_id
                 results_dir = os.getenv("RESULTS_DIR", "/results")
-                output_file = os.path.join(results_dir, "sequences", output_filename)
+                if run_id:
+                    # Save to run-specific phase2 directory
+                    output_dir = os.path.join(results_dir, run_id, "phase2")
+                    logger.info(f"Using run-specific directory: {output_dir}")
+                else:
+                    # Fallback to generic sequences directory for backwards compatibility
+                    output_dir = os.path.join(results_dir, "sequences")
+                    logger.warning("No run_id provided, using generic /results/sequences directory")
+                
+                output_file = os.path.join(output_dir, output_filename)
                 
                 # Ensure directory exists
-                os.makedirs(os.path.dirname(output_file), exist_ok=True)
+                os.makedirs(output_dir, exist_ok=True)
                 
                 # Save processed sequences
                 with open(output_file, 'w') as f:
@@ -835,6 +845,10 @@ async def handle_list_tools() -> List[types.Tool]:
                     "fasta_content": {
                         "type": "string",
                         "description": "Input FASTA sequences"
+                    },
+                    "run_id": {
+                        "type": "string",
+                        "description": "Run ID for organizing output files (optional, saves to /results/{run_id}/phase2/ if provided)"
                     },
                     "pipeline": {
                         "type": "array",
