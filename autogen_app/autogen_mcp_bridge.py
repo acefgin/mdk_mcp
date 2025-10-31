@@ -7,6 +7,7 @@ Connects AG2 agents to MCP servers for bioinformatics tool access.
 import asyncio
 import json
 import logging
+import time
 from typing import Dict, Any, List, Optional
 import subprocess
 import uuid
@@ -23,8 +24,9 @@ def summarize_large_result(result: Any, max_chars: int = 1000) -> str:
     """
     Summarize large tool results to avoid token limit issues.
     
-    CRITICAL: For sequence data, return ONLY metadata (count, headers).
+    CRITICAL: For sequence data, return ONLY metadata (count, headers, OUTPUT FILE PATH).
     NEVER return actual sequence content - it will break token budgets.
+    ALWAYS include output_file path if present - agents need this to continue workflow!
 
     Args:
         result: Tool result (could be string, dict, list, etc.)
@@ -50,13 +52,46 @@ def summarize_large_result(result: Any, max_chars: int = 1000) -> str:
         if isinstance(data, dict):
             summary_parts = []
 
-            # Count sequences if FASTA format - ONLY return metadata
-            if "sequences" in data or any(key.startswith('>') for key in str(data)[:1000]):
+            # CRITICAL: Always extract and display output_file if present
+            output_file = data.get("output_file")
+            stats = data.get("stats", {})
+            success = data.get("success", False)
+
+            # Count sequences if FASTA format - check for any *_fasta field or FASTA content
+            # Processing tools return: processed_fasta, cleaned_fasta, dereplicated_fasta, masked_fasta, non_chimeric_fasta
+            # Alignment tools return: alignment, sequences
+            has_fasta_data = (
+                any(key.endswith('_fasta') for key in data.keys()) or
+                "sequences" in data or
+                "alignment" in data or
+                any(key.startswith('>') for key in str(data)[:1000])
+            )
+
+            if has_fasta_data:
                 # Count sequences in FASTA
                 fasta_count = str(data).count('>')
                 if fasta_count > 0:
-                    summary_parts.append(f"Retrieved {fasta_count} sequences")
-                    # Show ONLY headers (first 2), NO sequence content
+                    # CRITICAL: Start with clear SUCCESS indicator if present
+                    if success:
+                        summary_parts.append("✅ PROCESSING COMPLETE - SUCCESS")
+                    else:
+                        summary_parts.append(f"✓ Processed {fasta_count} sequences")
+
+                    # CRITICAL: Show output file path prominently FIRST (this is what agents need)
+                    if output_file:
+                        summary_parts.append(f"\n📁 OUTPUT FILE: {output_file}")
+                        summary_parts.append("   ⚠️  USE THIS PATH for next steps")
+
+                    # Show statistics if available
+                    if stats:
+                        if "input_sequences" in stats and "output_sequences" in stats:
+                            summary_parts.append(f"\n📊 Processing Statistics:")
+                            summary_parts.append(f"   • Input: {stats['input_sequences']} sequences")
+                            summary_parts.append(f"   • Output: {stats['output_sequences']} sequences")
+                            summary_parts.append(f"   • Removed: {stats['input_sequences'] - stats['output_sequences']} sequences")
+                            summary_parts.append(f"   • Retention: {stats.get('retention_percent', 'N/A')}%")
+                    
+                    # Show ONLY first 2 headers, NO sequence content
                     lines = str(data).split('\n')
                     headers = []
                     for line in lines[:30]:  # Only scan first 30 lines
@@ -65,10 +100,23 @@ def summarize_large_result(result: Any, max_chars: int = 1000) -> str:
                             if len(headers) >= 2:
                                 break
                     if headers:
-                        summary_parts.append("\n\nSample headers:")
+                        summary_parts.append("\nSample headers:")
                         summary_parts.append('\n'.join(headers))
+                    
                     summary_parts.append(f"\n... and {fasta_count - 2} more sequences")
-                    summary_parts.append("\n[Sequence data saved to file - do not request full content]")
+                    summary_parts.append("\n[Full sequence data available in output file]")
+
+                    # CRITICAL: Add very clear next step instructions
+                    if output_file and success:
+                        summary_parts.append(f"\n{'='*60}")
+                        summary_parts.append("🔧 NEXT ACTION REQUIRED:")
+                        summary_parts.append(f"   Processing is COMPLETE. DO NOT call process_sequences again.")
+                        summary_parts.append(f"   PROCEED TO ALIGNMENT using:")
+                        summary_parts.append(f"   align_and_analyze(fasta_file=\"{output_file}\", ...")
+                        summary_parts.append(f"{'='*60}")
+                    elif output_file:
+                        summary_parts.append(f"\n🔧 NEXT STEP: Use fasta_file=\"{output_file}\" for alignment")
+
                     return '\n'.join(summary_parts)
 
             # Handle metadata extractions
@@ -153,12 +201,20 @@ class MCPClientBridge:
         logger.info("All MCP servers connected successfully")
 
     async def _start_server(self, server_name: str, config: Dict[str, str]) -> None:
-        """Start a single MCP server connection."""
+        """
+        Connect to a running MCP server.
+        
+        The MCP servers are already running in their containers (started by CMD in Dockerfile).
+        We connect to them by running a new instance via docker exec with interactive stdin.
+        """
         container = config["container"]
         command = config["command"]
-
-        # Connect via docker exec for stdio communication
+        
+        # Start a new instance of the MCP server to communicate with
+        # This is necessary because docker attach doesn't work well with asyncio pipes
         full_command = ["docker", "exec", "-i", container] + command
+        
+        logger.debug(f"Connecting to {server_name} via: {' '.join(full_command)}")
 
         process = await asyncio.create_subprocess_exec(
             *full_command,
@@ -168,6 +224,8 @@ class MCPClientBridge:
         )
 
         self.processes[server_name] = process
+        
+        logger.debug(f"Process created for {server_name}, initializing MCP protocol...")
 
         # Initialize MCP protocol
         await self._initialize_mcp_connection(server_name)
@@ -215,22 +273,24 @@ class MCPClientBridge:
         self,
         server: str,
         tool_name: str,
-        arguments: Dict[str, Any]
+        arguments: Dict[str, Any],
+        max_retries: int = 3
     ) -> Any:
         """
-        Call an MCP tool.
+        Call an MCP tool with exponential backoff retry logic.
 
         Args:
             server: Server name (e.g., "database")
             tool_name: Tool to call (e.g., "get_sequences")
             arguments: Tool arguments
+            max_retries: Maximum number of retry attempts (default: 3)
 
         Returns:
             Tool result
 
         Raises:
             ValueError: If server not found or not initialized
-            Exception: If MCP call fails
+            Exception: If MCP call fails after all retries
         """
         if not self.initialized:
             raise ValueError("MCP bridge not initialized. Call start_servers() first.")
@@ -250,26 +310,68 @@ class MCPClientBridge:
             }
         }
 
-        try:
-            response = await self._send_request(server, request)
+        last_exception = None
+        for attempt in range(max_retries):
+            try:
+                response = await self._send_request(server, request)
 
-            if "error" in response:
-                error_msg = response["error"]
-                logger.error(f"MCP error from {server}.{tool_name}: {error_msg}")
-                raise Exception(f"MCP Error: {error_msg}")
+                if "error" in response:
+                    error_msg = response["error"]
+                    error_str = str(error_msg)
 
-            result = response.get("result", [])
+                    # Check if error is retryable (rate limit, timeout, connection)
+                    is_retryable = any(keyword in error_str.lower() for keyword in [
+                        "rate limit", "timeout", "connection", "temporary",
+                        "503", "429", "502", "504"
+                    ])
 
-            # Extract text content from MCP result
-            if isinstance(result, list) and len(result) > 0:
-                if isinstance(result[0], dict) and "text" in result[0]:
-                    return result[0]["text"]
+                    if is_retryable and attempt < max_retries - 1:
+                        # Exponential backoff: 1s, 4s, 9s
+                        wait_time = (attempt + 1) ** 2
+                        logger.warning(f"[RETRY] {server}.{tool_name} failed with retryable error: {error_msg}")
+                        logger.warning(f"  Retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
+                        await asyncio.sleep(wait_time)
+                        continue
 
-            return result
+                    logger.error(f"MCP error from {server}.{tool_name}: {error_msg}")
+                    raise Exception(f"MCP Error: {error_msg}")
 
-        except Exception as e:
-            logger.error(f"Failed to call {server}.{tool_name}: {e}")
-            raise
+                result = response.get("result", [])
+
+                # Extract text content from MCP result
+                if isinstance(result, list) and len(result) > 0:
+                    if isinstance(result[0], dict) and "text" in result[0]:
+                        return result[0]["text"]
+
+                if attempt > 0:
+                    logger.info(f"[RETRY] {server}.{tool_name} succeeded on attempt {attempt + 1}")
+
+                return result
+
+            except Exception as e:
+                last_exception = e
+                error_str = str(e)
+
+                # Check if error is retryable
+                is_retryable = any(keyword in error_str.lower() for keyword in [
+                    "rate limit", "timeout", "connection", "temporary",
+                    "503", "429", "502", "504"
+                ])
+
+                if is_retryable and attempt < max_retries - 1:
+                    wait_time = (attempt + 1) ** 2
+                    logger.warning(f"[RETRY] {server}.{tool_name} failed: {e}")
+                    logger.warning(f"  Retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(wait_time)
+                    continue
+
+                # Non-retryable error or max retries reached
+                logger.error(f"Failed to call {server}.{tool_name}: {e}")
+                raise
+
+        # If we get here, all retries failed
+        logger.error(f"[RETRY] {server}.{tool_name} failed after {max_retries} attempts")
+        raise last_exception or Exception(f"Failed after {max_retries} retries")
 
     async def list_tools(self, server: str) -> List[Dict[str, Any]]:
         """
@@ -304,15 +406,46 @@ class MCPClientBridge:
     async def _send_request(self, server: str, request: Dict[str, Any]) -> Dict[str, Any]:
         """Send a JSON-RPC request to a server and get response."""
         process = self.processes[server]
+        
+        # Check if process is still alive
+        if process.returncode is not None:
+            logger.error(f"Process for {server} has exited with code {process.returncode}")
+            raise Exception(f"Connection lost - {server} process exited")
 
         # Send request
         request_json = json.dumps(request) + "\n"
-        process.stdin.write(request_json.encode())
-        await process.stdin.drain()
+        logger.debug(f"Sending request to {server}: {request_json[:200]}")
+        
+        try:
+            process.stdin.write(request_json.encode())
+            await process.stdin.drain()
+        except Exception as e:
+            logger.error(f"Failed to write to {server} stdin: {e}")
+            raise Exception(f"Connection lost - failed to write to {server}")
 
         # Read response (handle large responses by reading until newline)
         response_data = b""
+        response_line = None  # Initialize to prevent UnboundLocalError
         timeout_seconds = 60.0  # 60 second timeout for large responses
+
+        # Start task to read stderr in parallel
+        async def read_stderr():
+            try:
+                stderr_data = await asyncio.wait_for(process.stderr.read(4096), timeout=1.0)
+                if stderr_data:
+                    stderr_text = stderr_data.decode('utf-8', errors='ignore')
+                    # Only log as warning if it contains actual errors
+                    # MCP servers log INFO messages to stderr by default
+                    if any(level in stderr_text for level in ['ERROR', 'CRITICAL', 'WARNING', 'Exception', 'Traceback']):
+                        logger.warning(f"stderr from {server}: {stderr_text}")
+                    else:
+                        logger.debug(f"stderr from {server}: {stderr_text}")
+            except asyncio.TimeoutError:
+                pass  # No stderr data, that's fine
+            except Exception as e:
+                logger.debug(f"Error reading stderr from {server}: {e}")
+
+        stderr_task = asyncio.create_task(read_stderr())
 
         try:
             while True:
@@ -322,6 +455,16 @@ class MCPClientBridge:
                 )
 
                 if not chunk:
+                    # No more data available - check if we got any response
+                    if response_data:
+                        # Use whatever we have (might not end with newline)
+                        response_line = response_data.rstrip(b'\n')
+                    else:
+                        # Check if process exited
+                        if process.returncode is not None:
+                            logger.error(f"Process {server} exited during read with code {process.returncode}")
+                            await stderr_task  # Wait for stderr
+                            raise Exception(f"Connection lost - {server} process exited unexpectedly")
                     break
 
                 response_data += chunk
@@ -334,12 +477,30 @@ class MCPClientBridge:
                     break
 
         except asyncio.TimeoutError:
-            raise Exception(f"Timeout reading response from {server}")
+            # If we got partial data before timeout, try to use it
+            if response_data:
+                logger.warning(f"Timeout reading from {server}, attempting to parse partial response")
+                response_line = response_data.rstrip(b'\n')
+            else:
+                await stderr_task  # Check for errors in stderr
+                raise Exception(f"Timeout reading response from {server}")
+        finally:
+            # Clean up stderr task
+            if not stderr_task.done():
+                stderr_task.cancel()
 
         if not response_line:
-            raise Exception(f"No response from {server}")
+            logger.error(f"No response from {server}. Process alive: {process.returncode is None}")
+            raise Exception(f"No response received from {server}")
 
-        response = json.loads(response_line.decode())
+        logger.debug(f"Received response from {server}: {response_line[:200]}")
+
+        try:
+            response = json.loads(response_line.decode())
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to decode JSON response from {server}: {response_line[:200]}")
+            raise Exception(f"Invalid JSON response from {server}: {e}")
+
         return response
 
     def _gen_request_id(self) -> int:
@@ -707,9 +868,186 @@ def create_autogen_functions(available_servers: List[str]) -> List[Dict[str, Any
             }
         ])
 
-    # Future servers (when Phase 3+ implemented)
-    # Alignment server functions would go here
+    # Alignment Server Functions (Phase 3)
+    if "alignment" in available_servers:
+        functions.extend([
+            {
+                "name": "align_sequences",
+                "description": "Align sequences using various algorithms (MAFFT, MUSCLE, Clustal Omega, gget_muscle). "
+                              "Use this after processing to create a multiple sequence alignment for phylogenetic analysis. "
+                              "Provide either fasta_content (string) OR fasta_file (file path from /results/sequences/).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "fasta_content": {
+                            "type": "string",
+                            "description": "Input sequences in FASTA format (use this OR fasta_file, not both)"
+                        },
+                        "fasta_file": {
+                            "type": "string",
+                            "description": "Path to FASTA file (e.g., /results/sequences/Salmo_salar_COI_processed_20251023.fasta)"
+                        },
+                        "algorithm": {
+                            "type": "string",
+                            "enum": ["mafft", "muscle", "clustalo", "gget_muscle"],
+                            "default": "mafft",
+                            "description": "Alignment algorithm to use. MAFFT is fast and accurate for most cases."
+                        },
+                        "mafft_strategy": {
+                            "type": "string",
+                            "enum": ["auto", "linsi", "ginsi", "einsi"],
+                            "default": "auto",
+                            "description": "MAFFT alignment strategy (only for MAFFT): auto=automatic, linsi=accurate, ginsi=global, einsi=structural"
+                        },
+                        "max_iterations": {
+                            "type": "integer",
+                            "default": 1000,
+                            "description": "Maximum number of iterations for iterative refinement"
+                        },
+                        "super5": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Use MUSCLE5 super5 algorithm (only for gget_muscle)"
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "process_alignment",
+                "description": "Process and clean alignment using CIAlign, including gap removal and quality assessment. "
+                              "Use this after initial alignment to improve quality before phylogenetic analysis.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "alignment_content": {
+                            "type": "string",
+                            "description": "Aligned sequences in FASTA format (output from align_sequences)"
+                        },
+                        "trim_gaps": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Remove gap-rich columns from alignment"
+                        },
+                        "gap_threshold": {
+                            "type": "number",
+                            "default": 0.5,
+                            "description": "Threshold for gap removal (0-1). Columns with >50% gaps will be removed."
+                        },
+                        "remove_divergent": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Remove divergent sequences that don't align well"
+                        },
+                        "assess_quality": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Calculate alignment quality statistics"
+                        }
+                    },
+                    "required": ["alignment_content"]
+                }
+            },
+            {
+                "name": "build_phylogeny",
+                "description": "Build phylogenetic tree from alignment using NJ, ML, or MP methods. "
+                              "Use this to understand evolutionary relationships and identify signature regions.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "alignment_content": {
+                            "type": "string",
+                            "description": "Aligned sequences in FASTA format"
+                        },
+                        "method": {
+                            "type": "string",
+                            "enum": ["nj", "ml", "mp"],
+                            "default": "nj",
+                            "description": "Tree building method: nj=Neighbor Joining (fast), ml=Maximum Likelihood (accurate), mp=Maximum Parsimony"
+                        },
+                        "bootstrap": {
+                            "type": "integer",
+                            "default": 100,
+                            "description": "Number of bootstrap replicates for branch support"
+                        },
+                        "model": {
+                            "type": "string",
+                            "enum": ["p-distance", "jukes-cantor", "kimura"],
+                            "default": "kimura",
+                            "description": "Distance model for NJ method: kimura is standard for DNA sequences"
+                        }
+                    },
+                    "required": ["alignment_content"]
+                }
+            },
+            {
+                "name": "calculate_distances",
+                "description": "Calculate pairwise distance matrix from alignment. "
+                              "Use this to quantify sequence divergence and identify signature regions.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "alignment_content": {
+                            "type": "string",
+                            "description": "Aligned sequences in FASTA format"
+                        },
+                        "model": {
+                            "type": "string",
+                            "enum": ["p-distance", "jukes-cantor", "kimura"],
+                            "default": "kimura",
+                            "description": "Distance calculation model: kimura accounts for multiple substitutions"
+                        }
+                    },
+                    "required": ["alignment_content"]
+                }
+            },
+            {
+                "name": "align_and_analyze",
+                "description": "Complete pipeline: align sequences, process alignment, and optionally build phylogeny. "
+                              "WHEN TO USE: Prefer this for batch processing after sequence QC is complete. "
+                              "This combines alignment + cleaning + optional phylogenetic analysis in one call. "
+                              "Provide either fasta_content (string) OR fasta_file (file path from /results/sequences/).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "fasta_content": {
+                            "type": "string",
+                            "description": "Input sequences in FASTA format (use this OR fasta_file, not both)"
+                        },
+                        "fasta_file": {
+                            "type": "string",
+                            "description": "Path to FASTA file (e.g., /results/sequences/Salmo_salar_COI_processed_20251023.fasta)"
+                        },
+                        "algorithm": {
+                            "type": "string",
+                            "enum": ["mafft", "muscle", "clustalo", "gget_muscle"],
+                            "default": "mafft",
+                            "description": "Alignment algorithm"
+                        },
+                        "include_phylogeny": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Build phylogenetic tree after alignment"
+                        },
+                        "include_distances": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Calculate distance matrix after alignment"
+                        },
+                        "clean_alignment": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Clean alignment with CIAlign before phylogenetic analysis"
+                        }
+                    },
+                    "required": []
+                }
+            }
+        ])
+
+    # Future servers (when Phase 4+ implemented)
     # Design server functions would go here
+    # Validation server functions would go here
 
     return functions
 
@@ -759,6 +1097,12 @@ class AutoGenMCPFunctionExecutor:
             "mask_low_complexity": ("processing", "mask_low_complexity"),
             "detect_chimeras": ("processing", "detect_chimeras"),
             "process_sequences": ("processing", "process_sequences"),
+            # Alignment tools
+            "align_sequences": ("alignment", "align_sequences"),
+            "process_alignment": ("alignment", "process_alignment"),
+            "build_phylogeny": ("alignment", "build_phylogeny"),
+            "calculate_distances": ("alignment", "calculate_distances"),
+            "align_and_analyze": ("alignment", "align_and_analyze"),
         }
 
         if function_name not in function_map:
@@ -831,6 +1175,12 @@ class AutoGenMCPFunctionExecutor:
             "mask_low_complexity": ("processing", "mask_low_complexity"),
             "detect_chimeras": ("processing", "detect_chimeras"),
             "process_sequences": ("processing", "process_sequences"),
+            # Alignment tools
+            "align_sequences": ("alignment", "align_sequences"),
+            "process_alignment": ("alignment", "process_alignment"),
+            "build_phylogeny": ("alignment", "build_phylogeny"),
+            "calculate_distances": ("alignment", "calculate_distances"),
+            "align_and_analyze": ("alignment", "align_and_analyze"),
         }
 
         if function_name not in function_map:

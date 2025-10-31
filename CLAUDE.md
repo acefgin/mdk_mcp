@@ -14,27 +14,32 @@ This is **mdk_mcp** (Neglected Diagnostics MCP), an MCP-based system for biologi
 
 - **Database Server** (`mcp_servers/database_server/`) ✅ **COMPLETED**: Unified access to NCBI, BOLD, SILVA, UNITE, and SRA databases via gget and BioPython
 - **Processing Server** (`mcp_servers/processing_server/`) ✅ **COMPLETED**: Quality control, deduplication, masking, chimera detection via seqkit and vsearch
-- **Alignment Server** (not yet implemented): MAFFT/MUSCLE alignment + phylogenetic analysis + CIAlign
+- **Alignment Server** (`mcp_servers/alignment_server/`) ✅ **COMPLETED**: Multiple sequence alignment (MAFFT, MUSCLE, Clustal Omega), phylogenetic analysis, and CIAlign-based quality processing
 - **Design Server** (not yet implemented): Signature region discovery + Primer3 primer design + CIAlign consensus
 - **Validation Server** (not yet implemented): BLAST validation + in-silico PCR + literature search
 - **Export Server** (not yet implemented): Results export + provenance tracking
 
-**Current Status (as of October 2025)**:
+**Current Status (as of October 31, 2025)**:
 - **Phase 1 Complete**: Database Integration MCP server (11 tools)
 - **Phase 2 Complete**: Processing MCP server (5 tools)
-- **AG2 Integration Complete**: Multi-agent system with MCP bridge functional and tested
+- **Phase 3 Complete**: Alignment MCP server (5 tools)
+- **AG2 Integration Complete**: Multi-agent system with MCP bridge functional, all 3 phases integrated
 - **Testing Infrastructure**: Comprehensive MCP Inspector testing guides and automation
-- **Ready for Phase 3**: System ready to begin Alignment Server implementation
+- **Ready for Phase 4**: System ready to begin Design & Primers Server implementation
 
 ## Key Technologies
 
 - **MCP Framework**: stdio-based protocol for tool exposure
 - **AG2**: Multi-agent orchestration framework for AI assistants (formerly AutoGen)
 - **gget**: Standardized genomic database access (Ensembl, NCBI, UniProt)
-- **BioPython**: Sequence parsing and manipulation
+- **BioPython**: Sequence parsing and manipulation, phylogenetic analysis
 - **pysradb**: SRA/BioProject metadata access
 - **seqkit**: Fast FASTA/Q manipulation and statistics
 - **vsearch**: Clustering, dereplication, chimera detection, DUST masking
+- **MAFFT**: Fast and accurate multiple sequence alignment
+- **MUSCLE v5**: High-throughput sequence alignment
+- **Clustal Omega**: General-purpose multiple sequence alignment
+- **CIAlign**: Alignment cleaning and quality assessment
 - **Docker**: Containerized MCP servers with isolated dependencies
 - **Kubernetes**: Production orchestration and auto-scaling
 
@@ -91,6 +96,7 @@ pytest tests/
 # Quick automated testing
 ./test_mcp_server.sh database    # Test database server
 ./test_mcp_server.sh processing  # Test processing server
+./test_mcp_server.sh alignment   # Test alignment server
 
 # Interactive testing with MCP Inspector (UI mode)
 cd mcp_servers/database_server
@@ -99,6 +105,10 @@ npx @modelcontextprotocol/inspector python3 database_mcp_server.py
 
 cd mcp_servers/processing_server
 npx @modelcontextprotocol/inspector python3 processing_mcp_server.py
+# Open http://localhost:6274
+
+cd mcp_servers/alignment_server
+npx @modelcontextprotocol/inspector python3 alignment_mcp_server.py
 # Open http://localhost:6274
 
 # CLI testing
@@ -111,6 +121,9 @@ cd mcp_servers/database_server
 python -m pytest tests/ -v
 
 cd mcp_servers/processing_server
+python -m pytest tests/ -v
+
+cd mcp_servers/alignment_server
 python -m pytest tests/ -v
 
 # See comprehensive guide
@@ -236,9 +249,15 @@ The project follows a 6-phase roadmap (see `road_map.md`):
   - Comprehensive MCP Inspector testing guides created
   - Docker containerization with seqkit v2.6.1 + vsearch v2.25.0
   - Test automation scripts and documentation
-- **Phase 3: Alignment & Phylogenetics** 🔜 **NEXT** (4-5 weeks estimated)
-  - Will include: MAFFT, MUSCLE, Clustal Omega, CIAlign for alignment cleaning
-- Phase 4: Design & Primers (7-9 weeks)
+- **Phase 3: Alignment & Phylogenetics** ✅ **COMPLETED** (1 session actual - ahead of 4-5 week estimate!)
+  - 5 MCP tools implemented: align_sequences, process_alignment, build_phylogeny, calculate_distances, align_and_analyze
+  - Multiple alignment algorithms: MAFFT (with strategies), MUSCLE v5, Clustal Omega, gget_muscle
+  - Phylogenetic methods: Neighbor Joining, Maximum Likelihood, Maximum Parsimony
+  - CIAlign integration for alignment cleaning and quality assessment
+  - BioPython for distance calculations (p-distance, Jukes-Cantor, Kimura)
+  - Docker containerization with MAFFT v7.505 + MUSCLE v5.1 + Clustal Omega
+  - Full AG2 integration with AnalystAgent
+- **Phase 4: Design & Primers** 🔜 **NEXT** (7-9 weeks estimated)
   - Will include: Signature region discovery, Primer3, CIAlign for consensus generation
 - Phase 5: Validation & Literature (4-5 weeks)
 - Phase 6: Export & Provenance (1-2 weeks)
@@ -291,7 +310,7 @@ sequences = await bridge.call_tool("database", "get_sequences", {
 - Cloud SQL (BigQuery/Athena) requires additional credentials setup
 - Rate limiting is basic (no distributed rate limiting across instances)
 - No caching layer implemented yet (planned for future)
-- **Phases 3-6 MCP servers not yet implemented** (Phases 1-2 complete: Database + Processing)
+- **Phases 4-6 MCP servers not yet implemented** (Phases 1-3 complete: Database + Processing + Alignment)
 
 ## What's Been Accomplished
 
@@ -316,6 +335,19 @@ sequences = await bridge.call_tool("database", "get_sequences", {
 - ✅ Test coverage with pytest
 - ✅ Complete implementation documentation (README, IMPLEMENTATION_SUMMARY)
 
+### Phase 3: Alignment Server
+- ✅ 5 fully functional MCP tools for alignment and phylogenetics
+- ✅ Multiple alignment algorithms: MAFFT (auto, linsi, ginsi, einsi), MUSCLE v5, Clustal Omega, gget_muscle
+- ✅ CIAlign integration for alignment cleaning and quality assessment
+- ✅ Phylogenetic tree construction: Neighbor Joining, Maximum Likelihood, Maximum Parsimony
+- ✅ Distance matrix calculation with multiple models (p-distance, Jukes-Cantor, Kimura)
+- ✅ BioPython for phylogenetic analysis and tree manipulation
+- ✅ Unified pipeline tool (`align_and_analyze`) combining alignment, cleaning, and phylogeny
+- ✅ Docker containerization with MAFFT v7.505 + MUSCLE v5.1 + Clustal Omega v1.2
+- ✅ Test coverage with pytest
+- ✅ Complete implementation documentation (README, IMPLEMENTATION_SUMMARY)
+- ✅ Full AG2 integration with AnalystAgent (10 tools: 5 processing + 5 alignment)
+
 ### AG2 Integration
 - ✅ MCPClientBridge implemented (`autogen_app/autogen_mcp_bridge.py`)
 - ✅ Multi-agent qPCR assistant system (`autogen_app/qpcr_assistant.py`)
@@ -330,14 +362,14 @@ sequences = await bridge.call_tool("database", "get_sequences", {
 - ✅ Automated test script (`test_mcp_server.sh`)
 - ✅ Updated documentation with testing sections
 
-## What's Next (Phase 3)
+## What's Next (Phase 4)
 
-The Alignment Server is the next priority, which will add:
-- Multiple alignment algorithms (MAFFT, MUSCLE, Clustal Omega, gget_muscle)
-- CIAlign for alignment cleaning and quality assessment
-- Phylogenetic tree construction (NJ, ML methods)
-- Distance matrix calculation
-- Alignment statistics and visualization preparation
-- Unified `align_and_analyze` pipeline tool
+The Design Server is the next priority, which will add:
+- Signature region discovery and identification
+- Primer3 integration for qPCR primer design
+- CIAlign for consensus sequence generation
+- Specificity analysis for designed primers
+- Multi-criteria primer evaluation (Tm, GC content, secondary structures)
+- Unified `design_primers` pipeline tool
 
-See `road_map.md` Phase 3 for detailed specifications.
+See `road_map.md` Phase 4 for detailed specifications.

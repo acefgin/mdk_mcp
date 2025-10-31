@@ -10,6 +10,8 @@ import sys
 import asyncio
 import logging
 import json
+import uuid
+import hashlib
 import readline  # Import readline for proper line editing support
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Callable
@@ -27,6 +29,7 @@ from text_resources import (
     COORDINATOR_SYSTEM_MESSAGE,
     DATABASE_AGENT_SYSTEM_MESSAGE,
     ANALYST_SYSTEM_MESSAGE,
+    PRIMER_DESIGN_AGENT_SYSTEM_MESSAGE,
     README_TEMPLATE,
     BANNER_LINES,
     COMMANDS_TEXT,
@@ -144,12 +147,15 @@ class TaskLogger:
 
         # Smart truncation for tool results
         processed_result = self._smart_truncate(result, 1000)
+        
+        # NEW: Mask large fasta_content in arguments to avoid bloating logs
+        cleaned_arguments = self._mask_fasta_content(arguments)
 
         self.task_log[0]["tool_calls"].append({
             "timestamp": datetime.now().isoformat(),
             "agent": agent_name,
             "tool": tool_name,
-            "arguments": arguments,
+            "arguments": cleaned_arguments,
             "result_preview": processed_result,
             "result_length": len(result),
             "success": not result.startswith("Error:"),
@@ -327,6 +333,36 @@ class TaskLogger:
         truncated += f"\n\n[Content truncated - Full length: {len(content)} characters]"
         
         return truncated
+    
+    def _mask_fasta_content(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """Mask large fasta_content in arguments to avoid bloating logs."""
+        if not arguments or "fasta_content" not in arguments:
+            return arguments
+        
+        fasta_content = arguments.get("fasta_content", "")
+        
+        # If fasta_content is large (>500 chars), replace with summary
+        if isinstance(fasta_content, str) and len(fasta_content) > 500:
+            # Count sequences
+            seq_count = fasta_content.count('>')
+            
+            # Extract first header only
+            first_header = ""
+            if '>' in fasta_content:
+                first_newline = fasta_content.find('\n')
+                if first_newline > 0:
+                    first_header = fasta_content[:first_newline]
+            
+            # Create masked copy
+            masked_args = arguments.copy()
+            masked_args["fasta_content"] = (
+                f"[MASKED: {seq_count} sequences, {len(fasta_content):,} characters]\n"
+                f"First header: {first_header}\n"
+                f"[Full content available in tool_result file]"
+            )
+            return masked_args
+        
+        return arguments
 
 
 class QPCRAssistant:
@@ -347,6 +383,8 @@ class QPCRAssistant:
         # Default to gpt-4o if no model specified (needed for function calling)
         self.model_name = model_name or "gpt-4o"
         self.log_dir = log_dir
+        self.run_id = None  # Will be generated when workflow starts
+        self.run_dir = None  # Directory for current run: /results/{run_id}/
         self.mcp_bridge = None
         self.mcp_executor = None
         self.agents = {}
@@ -354,9 +392,173 @@ class QPCRAssistant:
         self.manager = None
         self.task_logger = TaskLogger(log_dir)
         self.event_loop = None  # For running async MCP calls
+        self.manifest = {}  # Manifest tracking for current run
 
         # Create llm_config for agents
         self.llm_config = self._build_llm_config()
+
+    def _generate_run_id(self) -> str:
+        """
+        Generate unique run ID for this workflow.
+
+        Returns:
+            UUID string for this run
+        """
+        run_id = str(uuid.uuid4())
+        logger.info(f"Generated run_id: {run_id}")
+        return run_id
+
+    def _create_run_directory(self):
+        """
+        Create directory structure for this run:
+        /results/{run_id}/
+        /results/{run_id}/phase1/  (Database retrieval)
+        /results/{run_id}/phase2/  (Processing & QC)
+        /results/{run_id}/phase3/  (Alignment & Phylogeny)
+        /results/{run_id}/phase4/  (Primer Design)
+        """
+        self.run_dir = os.path.join(self.log_dir, self.run_id)
+
+        # Create phase directories
+        phase_dirs = [
+            os.path.join(self.run_dir, "phase1"),  # Database retrieval
+            os.path.join(self.run_dir, "phase2"),  # Processing & QC
+            os.path.join(self.run_dir, "phase3"),  # Alignment & Phylogeny
+            os.path.join(self.run_dir, "phase4"),  # Primer Design (future)
+        ]
+
+        for phase_dir in phase_dirs:
+            os.makedirs(phase_dir, exist_ok=True)
+
+        logger.info(f"Created run directory structure at {self.run_dir}")
+
+        # Initialize manifest
+        self.manifest = {
+            "run_id": self.run_id,
+            "created_at": datetime.now().isoformat(),
+            "status": "in_progress",
+            "phases": {
+                "phase1": {"status": "pending", "artifacts": []},
+                "phase2": {"status": "pending", "artifacts": []},
+                "phase3": {"status": "pending", "artifacts": []},
+                "phase4": {"status": "pending", "artifacts": []},
+            },
+            "tool_versions": {
+                "gget": "unknown",
+                "seqkit": "unknown",
+                "vsearch": "unknown",
+                "mafft": "unknown",
+                "muscle": "unknown",
+                "clustalo": "unknown",
+            }
+        }
+
+        # Save initial manifest
+        self._save_manifest()
+
+    def _save_manifest(self):
+        """Save manifest.json to run directory."""
+        if not self.run_dir:
+            return
+
+        manifest_path = os.path.join(self.run_dir, "manifest.json")
+        with open(manifest_path, 'w') as f:
+            json.dump(self.manifest, f, indent=2)
+
+        logger.debug(f"Saved manifest to {manifest_path}")
+
+    def _check_cached_artifact(self, phase: str, artifact_type: str, metadata_match: Dict[str, Any] = None) -> Optional[str]:
+        """
+        Check if a cached artifact exists in the manifest.
+
+        Args:
+            phase: Phase name (e.g., "phase1", "phase2")
+            artifact_type: Type of artifact to look for
+            metadata_match: Optional metadata to match against (e.g., taxon, region)
+
+        Returns:
+            Path to cached artifact if found and valid, None otherwise
+        """
+        if not self.manifest or phase not in self.manifest.get("phases", {}):
+            return None
+
+        phase_artifacts = self.manifest["phases"][phase].get("artifacts", [])
+
+        for artifact in phase_artifacts:
+            # Check if type matches
+            if artifact.get("type") != artifact_type:
+                continue
+
+            # Check if file still exists
+            artifact_path = artifact.get("path")
+            if not artifact_path or not os.path.exists(artifact_path):
+                continue
+
+            # If metadata matching requested, check if metadata matches
+            if metadata_match:
+                artifact_metadata = artifact.get("metadata", {})
+                match = all(
+                    artifact_metadata.get(key) == value
+                    for key, value in metadata_match.items()
+                )
+                if not match:
+                    continue
+
+            # Verify file integrity if hash exists
+            stored_hash = artifact.get("sha256")
+            if stored_hash:
+                with open(artifact_path, 'rb') as f:
+                    current_hash = hashlib.sha256(f.read()).hexdigest()
+                if current_hash != stored_hash:
+                    logger.warning(f"Cached artifact at {artifact_path} has mismatched hash - ignoring")
+                    continue
+
+            logger.info(f"[IDEMPOTENCY] Found valid cached artifact: {artifact_path}")
+            return artifact_path
+
+        return None
+
+    def _update_manifest_artifact(self, phase: str, artifact_path: str, artifact_type: str, metadata: Dict[str, Any] = None):
+        """
+        Add artifact to manifest.
+
+        Args:
+            phase: Phase name (e.g., "phase1", "phase2")
+            artifact_path: Full path to artifact file
+            artifact_type: Type of artifact (e.g., "sequences", "alignment", "tree")
+            metadata: Additional metadata for the artifact
+        """
+        # Skip if manifest not initialized yet (before run_workflow starts)
+        if not self.manifest or "phases" not in self.manifest:
+            logger.debug(f"Manifest not initialized yet - skipping artifact tracking for {phase}/{artifact_type}")
+            return
+            
+        if phase not in self.manifest["phases"]:
+            logger.warning(f"Unknown phase '{phase}' - cannot update manifest")
+            return
+
+        # Calculate file hash for integrity checking
+        file_hash = None
+        if os.path.exists(artifact_path):
+            with open(artifact_path, 'rb') as f:
+                file_hash = hashlib.sha256(f.read()).hexdigest()
+
+        artifact = {
+            "path": artifact_path,
+            "type": artifact_type,
+            "created_at": datetime.now().isoformat(),
+            "size_bytes": os.path.getsize(artifact_path) if os.path.exists(artifact_path) else 0,
+            "sha256": file_hash,
+            "metadata": metadata or {}
+        }
+
+        self.manifest["phases"][phase]["artifacts"].append(artifact)
+        self.manifest["phases"][phase]["status"] = "completed"
+
+        # Save updated manifest
+        self._save_manifest()
+
+        logger.info(f"Added artifact to manifest: {phase}/{artifact_type}")
 
     def _build_llm_config(self) -> Dict[str, Any]:
         """Build LLM configuration for AG2 agents."""
@@ -393,16 +595,41 @@ class QPCRAssistant:
            - These are registered separately via agent.register_function()
 
         Both are required for successful function calling.
+        
+        DatabaseAgent has ONLY database tools (pure data retrieval) per 4-agent architecture.
+        Processing tools belong to AnalystAgent.
         """
         # Start with base config
         config = self._build_llm_config().copy()
 
-        # Add function schemas for MCP tools (database + processing)
-        # This tells the LLM which functions are available and how to call them
-        function_schemas = create_autogen_functions(["database", "processing"])
+        # Add function schemas for MCP tools (DATABASE ONLY - pure data retrieval)
+        # Processing and alignment tools belong to AnalystAgent
+        function_schemas = create_autogen_functions(["database"])
         config["functions"] = function_schemas
 
-        logger.info(f"DatabaseAgent llm_config includes {len(function_schemas)} function schemas")
+        logger.info(f"DatabaseAgent llm_config includes {len(function_schemas)} function schemas (database only)")
+        logger.debug(f"Function schemas: {[f['name'] for f in function_schemas]}")
+
+        return config
+
+    def _build_analyst_agent_llm_config(self) -> Dict[str, Any]:
+        """
+        Build LLM configuration specifically for AnalystAgent with processing + alignment function schemas.
+
+        AnalystAgent handles ALL sequence curation and analysis tasks:
+        - Quality control and processing (from processing server)
+        - Alignment and phylogenetic analysis (from alignment server)
+        This makes AnalystAgent responsible for preparing curated, analysis-ready data for primer design.
+        """
+        # Start with base config
+        config = self._build_llm_config().copy()
+
+        # Add function schemas for processing AND alignment MCP tools
+        # AnalystAgent is responsible for the entire data curation pipeline
+        function_schemas = create_autogen_functions(["processing", "alignment"])
+        config["functions"] = function_schemas
+
+        logger.info(f"AnalystAgent llm_config includes {len(function_schemas)} function schemas")
         logger.debug(f"Function schemas: {[f['name'] for f in function_schemas]}")
 
         return config
@@ -436,10 +663,14 @@ class QPCRAssistant:
             "processing": {
                 "container": os.getenv("MCP_PROCESSING_SERVER", "ndiag-processing-server"),
                 "command": ["python3", "/app/processing_mcp_server.py"]
+            },
+            "alignment": {
+                "container": os.getenv("MCP_ALIGNMENT_SERVER", "ndiag-alignment-server"),
+                "command": ["python3", "/app/alignment_mcp_server.py"]
             }
             # Add more servers as phases complete:
-            # "alignment": {...},
             # "design": {...},
+            # "validation": {...},
         }
 
         self.mcp_bridge = MCPClientBridge(server_configs)
@@ -451,14 +682,46 @@ class QPCRAssistant:
         logger.info("MCP servers connected")
 
     def _save_sequences_to_file(self, sequences: str, taxon: str, region: str, category: str) -> str:
-        """Save sequences to organized folder structure."""
+        """
+        Save sequences to organized folder structure using run_id.
+
+        Args:
+            sequences: FASTA sequences to save
+            taxon: Taxonomic name
+            region: Gene region (e.g., "COI", "16S")
+            category: Category for organizing (e.g., "sequences", "targets", "off_targets")
+
+        Returns:
+            Full path to saved file
+        """
         import os
         import re
         from datetime import datetime
 
-        # Create folder structure
-        category_folder = os.path.join(self.log_dir, category)
-        os.makedirs(category_folder, exist_ok=True)
+        # Map category to phase
+        phase_mapping = {
+            "sequences": "phase1",
+            "targets": "phase1",
+            "off_targets": "phase1",
+            "processed": "phase2",
+            "aligned": "phase3",
+            "tree": "phase3",
+        }
+        phase = phase_mapping.get(category, "phase1")
+
+        # Use run_id directory if available, otherwise fall back to legacy structure
+        if self.run_dir and os.path.isdir(self.run_dir):
+            category_folder = os.path.join(self.run_dir, phase)
+        else:
+            # Legacy path for backward compatibility (when run_workflow hasn't been called yet)
+            logger.debug(f"Using legacy path for {category}, run_dir not available")
+            category_folder = os.path.join(self.log_dir, category)
+
+        try:
+            os.makedirs(category_folder, exist_ok=True)
+        except Exception as e:
+            logger.error(f"Failed to create directory {category_folder}: {e}")
+            raise
 
         # Sanitize taxon name for filename
         safe_taxon = re.sub(r'[^\w\s-]', '', taxon).replace(' ', '_')
@@ -472,6 +735,23 @@ class QPCRAssistant:
 
         # Count sequences
         seq_count = sequences.count(">")
+
+        # Update manifest if run_id is active and manifest is initialized
+        if self.run_dir and self.manifest and "phases" in self.manifest:
+            try:
+                self._update_manifest_artifact(
+                    phase=phase,
+                    artifact_path=filepath,
+                    artifact_type="sequences",
+                    metadata={
+                        "taxon": taxon,
+                        "region": region,
+                        "category": category,
+                        "sequence_count": seq_count
+                    }
+                )
+            except Exception as e:
+                logger.warning(f"Failed to update manifest for {filepath}: {e}")
 
         # Update or create README
         self._update_readme(category_folder, safe_taxon, region, filename, seq_count)
@@ -505,7 +785,8 @@ class QPCRAssistant:
             region=region,
             filename=filename,
             seq_count=seq_count,
-            folder=folder
+            folder=folder,
+            run_id=self.run_id or "unknown"  # Use "unknown" if run_id not yet generated
         )
 
         with open(readme_path, 'w') as f:
@@ -524,44 +805,88 @@ class QPCRAssistant:
                     # CRITICAL: For get_sequences, we need the FULL result before summarization
                     # So we call the MCP bridge directly and handle summarization ourselves
                     if func_name == "get_sequences":
+                        logger.debug(f"[WRAPPER] Starting get_sequences, run_id={self.run_id}, run_dir={self.run_dir}")
+                        
                         # Get full result directly from MCP bridge (no summarization)
                         full_result = self.event_loop.run_until_complete(
                             self.mcp_executor._call_mcp_tool_raw(func_name, kwargs)
                         )
+                        logger.debug(f"[WRAPPER] Got MCP result, length={len(str(full_result))}")
                         
                         # Log the tool call (with full result)
+                        logger.debug("[WRAPPER] About to log tool call")
                         self.task_logger.log_tool_call(
                             "DatabaseAgent",
                             func_name,
                             kwargs,
                             full_result
                         )
+                        logger.debug("[WRAPPER] Logged tool call")
                         
                         # Save to file and return metadata only
+                        logger.debug("[WRAPPER] About to handle sequence result")
                         result = self._handle_sequence_result(full_result, kwargs)
+                        logger.debug(f"[WRAPPER] Handled sequence result, returning summary")
                         return result
                     
+                    # For processing and alignment tools, get RAW result before summarization
+                    # so we can extract file paths from JSON
+                    if func_name in ["process_sequences", "fasta_qc", "dereplicate_sequences", 
+                                     "mask_low_complexity", "detect_chimeras",
+                                     "align_sequences", "align_and_analyze", "build_phylogeny", 
+                                     "process_alignment", "calculate_distances"]:
+                        # Inject run_id into processing tool calls for proper file organization
+                        if func_name in ["process_sequences", "fasta_qc", "dereplicate_sequences", 
+                                        "mask_low_complexity", "detect_chimeras"] and self.run_id:
+                            kwargs_with_run_id = {**kwargs, "run_id": self.run_id}
+                            logger.debug(f"[WRAPPER] Injecting run_id={self.run_id} into {func_name}")
+                        else:
+                            kwargs_with_run_id = kwargs
+                        
+                        # Get full RAW result (no summarization)
+                        raw_result = self.event_loop.run_until_complete(
+                            self.mcp_executor._call_mcp_tool_raw(func_name, kwargs_with_run_id)
+                        )
+                        
+                        # Log the tool call with full result
+                        self.task_logger.log_tool_call(
+                            "AnalystAgent",  # These are AnalystAgent tools
+                            func_name,
+                            kwargs,
+                            raw_result
+                        )
+                        
+                        # Handle the result to extract file paths and update manifest
+                        if func_name in ["process_sequences", "fasta_qc", "dereplicate_sequences", 
+                                        "mask_low_complexity", "detect_chimeras"]:
+                            result = self._handle_processing_tool_result(raw_result, kwargs, func_name)
+                        else:
+                            result = self._handle_alignment_tool_result(raw_result, kwargs, func_name)
+                    
                     # For other functions, use normal flow with summarization
-                    result = self.event_loop.run_until_complete(
-                        self.mcp_executor.execute_function(func_name, kwargs)
-                    )
+                    else:
+                        result = self.event_loop.run_until_complete(
+                            self.mcp_executor.execute_function(func_name, kwargs)
+                        )
 
-                    # Log the tool call
-                    self.task_logger.log_tool_call(
-                        "DatabaseAgent",
-                        func_name,
-                        kwargs,
-                        result
-                    )
+                        # Log the tool call
+                        self.task_logger.log_tool_call(
+                            "DatabaseAgent",
+                            func_name,
+                            kwargs,
+                            result
+                        )
 
-                    # For extract_sequence_columns, limit output
-                    if func_name == "extract_sequence_columns":
-                        result = self._handle_metadata_result(result, kwargs)
+                        # For extract_sequence_columns, limit output
+                        if func_name == "extract_sequence_columns":
+                            result = self._handle_metadata_result(result, kwargs)
 
                     return result
                 except Exception as e:
+                    import traceback
                     error_msg = f"Error calling {func_name}: {str(e)}"
                     logger.error(error_msg)
+                    logger.error(f"Full traceback:\n{traceback.format_exc()}")
                     return error_msg
 
             return wrapper
@@ -580,6 +905,12 @@ class QPCRAssistant:
             "mask_low_complexity": make_sync_wrapper("mask_low_complexity"),
             "detect_chimeras": make_sync_wrapper("detect_chimeras"),
             "process_sequences": make_sync_wrapper("process_sequences"),
+            # Alignment tools (Phase 3)
+            "align_sequences": make_sync_wrapper("align_sequences"),
+            "process_alignment": make_sync_wrapper("process_alignment"),
+            "build_phylogeny": make_sync_wrapper("build_phylogeny"),
+            "calculate_distances": make_sync_wrapper("calculate_distances"),
+            "align_and_analyze": make_sync_wrapper("align_and_analyze"),
         }
     
     def _handle_sequence_result(self, result: str, kwargs: dict) -> str:
@@ -669,165 +1000,923 @@ Do NOT request the full sequence content - it's already saved."""
     
     def _handle_metadata_result(self, result: str, kwargs: dict) -> str:
         """
-        Handle extract_sequence_columns result: Limit to first 10 records.
+        Handle extract_sequence_columns result: Filter PII and limit to first 10 records.
         """
         if not result or result.startswith("Error"):
             return result
-        
-        # If result is very long, truncate to first 10 records
+
+        # If result is very long, truncate to first 10 records and filter PII
         try:
             import json
             data = json.loads(result) if isinstance(result, str) else result
-            
-            if isinstance(data, list) and len(data) > 10:
-                truncated_data = data[:10]
-                summary = json.dumps(truncated_data, indent=2)
-                summary += f"\n\n... and {len(data) - 10} more records (total: {len(data)} records)"
-                return summary
+
+            # Filter PII from metadata records
+            if isinstance(data, list):
+                # Filter each record
+                filtered_data = [self._filter_pii_from_metadata(record) if isinstance(record, dict) else record
+                                 for record in data]
+
+                if len(filtered_data) > 10:
+                    truncated_data = filtered_data[:10]
+                    summary = json.dumps(truncated_data, indent=2)
+                    summary += f"\n\n... and {len(data) - 10} more records (total: {len(data)} records)"
+                    return summary
+                else:
+                    return json.dumps(filtered_data, indent=2)
+
             elif isinstance(data, dict) and "records" in data:
                 records = data["records"]
-                if len(records) > 10:
-                    data["records"] = records[:10]
+                # Filter each record
+                filtered_records = [self._filter_pii_from_metadata(record) if isinstance(record, dict) else record
+                                    for record in records]
+
+                if len(filtered_records) > 10:
+                    data["records"] = filtered_records[:10]
                     summary = json.dumps(data, indent=2)
                     summary += f"\n\n... and {len(records) - 10} more records (total: {len(records)} records)"
                     return summary
+                else:
+                    data["records"] = filtered_records
+                    return json.dumps(data, indent=2)
+
+            elif isinstance(data, dict):
+                # Single record - filter it
+                filtered_data = self._filter_pii_from_metadata(data)
+                return json.dumps(filtered_data, indent=2)
+
         except:
             pass
-        
+
         # If not too long or can't parse, return as-is (but limit to 3000 chars)
         if len(result) > 3000:
             return result[:3000] + f"\n\n... [Truncated: {len(result) - 3000} more characters]"
-        
+
         return result
 
-    def _create_agents(self):
-        """Create AutoGen agent team (AG2 0.2.x style)."""
-
-        # Verify MCP bridge is initialized
-        if not self.mcp_executor:
-            raise RuntimeError("MCP executor not initialized. Call _initialize_mcp_bridge() first.")
+    def _handle_mcp_file_result(self, result: str, kwargs: dict, tool_config: Dict[str, Any]) -> str:
+        """
+        Generic handler for MCP tool results that export files.
+        Parses JSON output, extracts file paths, updates manifest, and returns formatted summary.
         
-        logger.info("MCP executor verified - creating agents with tool access")
+        Args:
+            result: JSON result from MCP tool (may be wrapped in MCP response format)
+            kwargs: Original function arguments
+            tool_config: Configuration dictionary with:
+                - phase: Workflow phase (e.g., "phase1", "phase2", "phase3")
+                - output_fields: List of field names to extract from JSON (e.g., ["output_file"])
+                  or dict mapping field names to artifact types (e.g., {"alignment_file": "alignment"})
+                - log_prefix: Prefix for log messages (e.g., "PROCESSING", "ALIGNMENT")
+                - summary_template: Function that generates summary message from extracted data
+        
+        Returns:
+            Summary message with actual output file paths for agents to use
+        """
+        if not result or (isinstance(result, str) and result.startswith("Error")):
+            return result
+        
+        try:
+            import json
+            import os
+            
+            # Extract actual JSON from MCP response wrapper if needed
+            # MCP returns: {'content': [{'type': 'text', 'text': 'JSON DATA'}], 'isError': False}
+            actual_json = result
+            if isinstance(result, dict):
+                # Already a dict - check if it's MCP-wrapped
+                if 'content' in result and isinstance(result['content'], list):
+                    if len(result['content']) > 0 and 'text' in result['content'][0]:
+                        actual_json = result['content'][0]['text']
+            elif isinstance(result, str) and result.startswith('{'):
+                # Try to parse as JSON
+                try:
+                    temp_parsed = json.loads(result)
+                    if isinstance(temp_parsed, dict) and 'content' in temp_parsed:
+                        # MCP-wrapped
+                        if isinstance(temp_parsed['content'], list) and len(temp_parsed['content']) > 0:
+                            if 'text' in temp_parsed['content'][0]:
+                                actual_json = temp_parsed['content'][0]['text']
+                    else:
+                        actual_json = result
+                except:
+                    pass
+            
+            # Parse the actual JSON content
+            if isinstance(actual_json, str):
+                parsed = json.loads(actual_json) if actual_json.startswith('{') else None
+            elif isinstance(actual_json, dict):
+                parsed = actual_json
+            else:
+                return result
+                
+            if not parsed or not isinstance(parsed, dict):
+                return result
+            
+            phase = tool_config.get("phase", "phase1")
+            log_prefix = tool_config.get("log_prefix", "MCP")
+            output_fields = tool_config.get("output_fields", {})
+            
+            # Extract output files
+            # Support both list format ["output_file"] and dict format {"alignment_file": "alignment"}
+            if isinstance(output_fields, list):
+                # Convert list to dict with generic artifact type
+                output_fields = {field: "output" for field in output_fields}
+            
+            extracted_files = []
+            for field_name, artifact_type in output_fields.items():
+                file_path = parsed.get(field_name)
+                if file_path and os.path.exists(file_path):
+                    extracted_files.append({
+                        "field": field_name,
+                        "path": file_path,
+                        "type": artifact_type
+                    })
+                elif file_path:
+                    logger.warning(f"[{log_prefix}] Output file doesn't exist: {file_path}")
+            
+            if not extracted_files:
+                logger.warning(f"[{log_prefix}] No valid output files found in result")
+                return result
+            
+            # Extract taxon from input filename if available
+            input_file = kwargs.get("fasta_file", "unknown")
+            taxon = self._extract_taxon_from_filename(input_file)
+            
+            # Filter out large FASTA/alignment content to prevent log and manifest bloat
+            # These fields contain full sequence data and can be massive (>100KB)
+            large_content_fields = ["alignment", "processed_fasta", "fasta_content", "sequences", "content", "text"]
+            
+            # Update manifest for each output file
+            if self.run_dir and self.manifest and "phases" in self.manifest:
+                for file_info in extracted_files:
+                    try:
+                        # Build metadata from kwargs and parsed result
+                        # Exclude large content fields and file path fields from metadata
+                        excluded_fields = set(output_fields.keys()) | set(large_content_fields)
+                        metadata = {
+                            "input_file": input_file,
+                            "taxon": taxon,
+                            **{k: v for k, v in kwargs.items() if k not in ["fasta_file"]},
+                            **{k: v for k, v in parsed.items() if k not in excluded_fields and not k.endswith("_file")}
+                        }
+                        
+                        self._update_manifest_artifact(
+                            phase=phase,
+                            artifact_path=file_info["path"],
+                            artifact_type=file_info["type"],
+                            metadata=metadata
+                        )
+                        logger.info(f"[{log_prefix}] Updated manifest with {file_info['type']} artifact: {file_info['path']}")
+                    except Exception as e:
+                        logger.warning(f"[{log_prefix}] Failed to update manifest for {file_info['type']}: {e}")
+            
+            # Generate summary using template function
+            summary_template = tool_config.get("summary_template")
+            if summary_template and callable(summary_template):
+                return summary_template(parsed, kwargs, extracted_files)
+            
+            # Default summary if no template provided
+            return self._format_default_summary(parsed, kwargs, extracted_files, log_prefix)
+            
+        except Exception as e:
+            logger.error(f"[{tool_config.get('log_prefix', 'MCP')}] Error handling MCP result: {e}")
+            return result
+    
+    def _parse_mcp_json(self, result: str) -> Optional[Dict]:
+        """
+        Lightweight JSON parser for MCP responses.
+        Handles both raw JSON and MCP-wrapped responses.
+        
+        Args:
+            result: JSON string or MCP-wrapped response
+        
+        Returns:
+            Parsed dictionary or None if parsing fails
+        """
+        import json
+        
+        try:
+            # If already a dict, check if MCP-wrapped
+            if isinstance(result, dict):
+                if 'content' in result and isinstance(result['content'], list):
+                    if len(result['content']) > 0 and 'text' in result['content'][0]:
+                        result = result['content'][0]['text']
+                    else:
+                        return result
+                else:
+                    return result
+            
+            # Parse string as JSON
+            if isinstance(result, str) and result.startswith('{'):
+                parsed = json.loads(result)
+                
+                # Check if MCP-wrapped
+                if isinstance(parsed, dict) and 'content' in parsed:
+                    if isinstance(parsed['content'], list) and len(parsed['content']) > 0:
+                        if 'text' in parsed['content'][0]:
+                            # Re-parse the inner text
+                            inner_text = parsed['content'][0]['text']
+                            if isinstance(inner_text, str) and inner_text.startswith('{'):
+                                return json.loads(inner_text)
+                            return {"text": inner_text}
+                
+                return parsed
+            
+        except json.JSONDecodeError as e:
+            logger.debug(f"JSON parse failed: {e}")
+        except Exception as e:
+            logger.debug(f"Unexpected error parsing JSON: {e}")
+        
+        return None
+    
+    def _extract_taxon_from_filename(self, filename: str) -> str:
+        """
+        Extract taxon name from filename.
+        Assumes format like "Salmo_salar_COI_20251031.fasta".
+        
+        Args:
+            filename: Input file path or name
+        
+        Returns:
+            Taxon name (e.g., "Salmo_salar") or "unknown"
+        """
+        import os
+        basename = os.path.basename(filename)
+        if "_" in basename:
+            parts = basename.split("_")
+            if len(parts) >= 2:
+                return f"{parts[0]}_{parts[1]}"
+        return "unknown"
+    
+    def _format_default_summary(self, parsed: Dict, kwargs: Dict, files: List[Dict], prefix: str) -> str:
+        """
+        Format a default summary message when no custom template is provided.
+        
+        Args:
+            parsed: Parsed JSON result
+            kwargs: Original function arguments
+            files: List of extracted file info dicts
+            prefix: Log prefix for context
+        
+        Returns:
+            Formatted summary message
+        """
+        summary_parts = [f"✓ {prefix} complete!"]
+        summary_parts.append(f"\n**Input:** {kwargs.get('fasta_file', 'unknown')}")
+        
+        for file_info in files:
+            summary_parts.append(f"\n**{file_info['type'].replace('_', ' ').title()}:** {file_info['path']}")
+        
+        summary_parts.append("\n\n**IMPORTANT:** Use these exact paths for next steps.")
+        
+        return ''.join(summary_parts)
+    
+    def _get_tool_config(self, tool_name: str) -> Dict[str, Any]:
+        """
+        Get configuration for a specific MCP tool.
+        Returns config dict with phase, output_fields, log_prefix, and optional summary_template.
+        
+        Args:
+            tool_name: Name of the MCP tool (e.g., "process_sequences", "align_and_analyze")
+        
+        Returns:
+            Configuration dictionary for the tool
+        """
+        # Processing tools configuration
+        if tool_name == "process_sequences":
+            def processing_summary(parsed: Dict, kwargs: Dict, files: List[Dict]) -> str:
+                sequences_in = parsed.get("sequences_in", "unknown")
+                sequences_out = parsed.get("sequences_out", "unknown")
+                pipeline = kwargs.get("pipeline", [])
+                output_file = files[0]["path"] if files else "unknown"
+                
+                return f"""✓ Processing complete!
 
-        # Display model information
-        model_info = self.config_list[0] if self.config_list else {}
-        model_name = self.model_name or model_info.get("model", "unknown")
-        api_type = model_info.get("api_type", "unknown")
+**Input:** {kwargs.get('fasta_file', 'unknown')}
+**Output:** {output_file}
 
-        model_display = MODEL_DISPLAY_NAMES.get(model_name, f"{api_type.upper()} - {model_name}")
+**Pipeline:** {' → '.join(pipeline)}
+**Sequences:** {sequences_in} → {sequences_out}
 
-        print_colored(f"🤖 Using {model_display}", Colors.BRIGHT_GREEN)
+**IMPORTANT:** Use this exact path for next steps:
+{output_file}
 
-        # Create MCP function wrappers
-        mcp_functions = self._create_mcp_function_wrappers()
+The processed sequences are ready for alignment and phylogenetic analysis."""
+            
+            return {
+                "phase": "phase2",
+                "output_fields": {"output_file": "processed_sequences"},
+                "log_prefix": "PROCESSING",
+                "summary_template": processing_summary
+            }
+        
+        elif tool_name in ["fasta_qc", "dereplicate_sequences", "mask_low_complexity", "detect_chimeras"]:
+            # Individual processing tools - use simple config
+            tool_labels = {
+                "fasta_qc": "QC",
+                "dereplicate_sequences": "DEREPLICATION",
+                "mask_low_complexity": "MASKING",
+                "detect_chimeras": "CHIMERA_DETECTION"
+            }
+            return {
+                "phase": "phase2",
+                "output_fields": {"output_file": tool_name.replace("_", "-")},
+                "log_prefix": tool_labels.get(tool_name, tool_name.upper())
+            }
+        
+        # Alignment tools configuration
+        elif tool_name in ["align_sequences", "align_and_analyze"]:
+            def alignment_summary(parsed: Dict, kwargs: Dict, files: List[Dict]) -> str:
+                algorithm = kwargs.get("algorithm", "unknown")
+                summary_parts = [f"✓ Alignment and analysis complete using {algorithm}!"]
+                summary_parts.append(f"\n**Input:** {kwargs.get('fasta_file', 'unknown')}")
+                
+                file_labels = {
+                    "alignment": "Alignment file",
+                    "phylogeny": "Phylogenetic tree",
+                    "distances": "Distance matrix"
+                }
+                
+                for file_info in files:
+                    label = file_labels.get(file_info["type"], file_info["type"])
+                    summary_parts.append(f"\n**{label}:** {file_info['path']}")
+                
+                summary_parts.append("\n\n**IMPORTANT:** Use these exact paths for primer design steps.")
+                summary_parts.append("\nThe aligned sequences and phylogenetic analysis are ready for identifying signature regions.")
+                
+                return ''.join(summary_parts)
+            
+            return {
+                "phase": "phase3",
+                "output_fields": {
+                    "alignment_file": "alignment",
+                    "tree_file": "phylogeny",
+                    "distance_file": "distances"
+                },
+                "log_prefix": "ALIGNMENT",
+                "summary_template": alignment_summary
+            }
+        
+        elif tool_name == "build_phylogeny":
+            return {
+                "phase": "phase3",
+                "output_fields": {"tree_file": "phylogeny"},
+                "log_prefix": "PHYLOGENY"
+            }
+        
+        elif tool_name == "calculate_distances":
+            return {
+                "phase": "phase3",
+                "output_fields": {"distance_file": "distances"},
+                "log_prefix": "DISTANCES"
+            }
+        
+        elif tool_name == "process_alignment":
+            return {
+                "phase": "phase3",
+                "output_fields": {"output_file": "processed_alignment"},
+                "log_prefix": "ALIGNMENT_PROCESSING"
+            }
+        
+        # Default config for unknown tools
+        else:
+            return {
+                "phase": "phase1",
+                "output_fields": {"output_file": "output"},
+                "log_prefix": tool_name.upper()
+            }
+    
+    def _handle_processing_tool_result(self, result: str, kwargs: dict, tool_name: str) -> str:
+        """
+        Lightweight handler for processing tool results.
+        
+        Processing server saves files natively and returns paths in JSON.
+        This handler just extracts paths, updates manifest, and returns summary.
+        
+        Args:
+            result: JSON result from processing tool with output_file path
+            kwargs: Original function arguments
+            tool_name: Name of the tool being handled
+        
+        Returns:
+            Formatted summary message
+        """
+        if not result or (isinstance(result, str) and result.startswith("Error")):
+            return result
+        
+        try:
+            import json
+            import os
+            
+            # Quick JSON parse - processing server returns simple structure
+            parsed = self._parse_mcp_json(result)
+            if not parsed or not isinstance(parsed, dict):
+                return result
+            
+            # Extract output file path
+            output_file = parsed.get("output_file")
+            if not output_file:
+                logger.warning(f"[PROCESSING] No output_file in {tool_name} result")
+                return result
+            
+            # Verify file exists
+            if not os.path.exists(output_file):
+                logger.error(f"[PROCESSING] Output file doesn't exist: {output_file}")
+                return f"Error: Processing completed but output file not found: {output_file}"
+            
+            # Update manifest (lightweight - just track the file)
+            if self.run_dir and self.manifest and "phases" in self.manifest:
+                input_file = kwargs.get("fasta_file", "unknown")
+                taxon = self._extract_taxon_from_filename(input_file)
+                
+                # Minimal metadata - no large content fields
+                # Extract sequence counts from stats (MCP server returns stats.input_sequences/output_sequences)
+                stats = parsed.get("stats", {})
+                metadata = {
+                    "input_file": input_file,
+                    "taxon": taxon,
+                    "sequences_in": stats.get("input_sequences", parsed.get("sequences_in")),
+                    "sequences_out": stats.get("output_sequences", parsed.get("sequences_out")),
+                    "pipeline": kwargs.get("pipeline", [])
+                }
+                
+                self._update_manifest_artifact(
+                    phase="phase2",
+                    artifact_path=output_file,
+                    artifact_type="processed_sequences",
+                    metadata=metadata
+                )
+                logger.info(f"[PROCESSING] Tracked {output_file} in manifest")
+            
+            # Generate lightweight summary
+            # Extract sequence counts from stats object (MCP server returns stats.input_sequences/output_sequences)
+            stats = parsed.get("stats", {})
+            sequences_in = stats.get("input_sequences", parsed.get("sequences_in", "unknown"))
+            sequences_out = stats.get("output_sequences", parsed.get("sequences_out", "unknown"))
+            pipeline = kwargs.get("pipeline", [])
+            
+            summary = f"""✓ Processing complete!
 
-        # Create function map for registration
-        function_map = {
-            # Database tools
+**Input:** {kwargs.get('fasta_file', 'unknown')}
+**Output:** {output_file}
+
+**Pipeline:** {' → '.join(pipeline) if pipeline else 'default'}
+**Sequences:** {sequences_in} → {sequences_out}
+
+**IMPORTANT:** Use this exact path for next steps:
+{output_file}
+
+The processed sequences are ready for alignment and phylogenetic analysis."""
+            
+            return summary
+            
+        except Exception as e:
+            logger.error(f"[PROCESSING] Error handling {tool_name} result: {e}")
+            return result
+    
+    def _handle_alignment_tool_result(self, result: str, kwargs: dict, tool_name: str) -> str:
+        """
+        Handle alignment tool results by saving data to files and returning summary.
+        
+        Unlike processing tools that return file paths, alignment tools return data
+        (alignment content, distance matrices, phylogenetic trees) that we need to save.
+        
+        Args:
+            result: JSON result from alignment tool with data fields
+            kwargs: Original function arguments
+            tool_name: Tool name (e.g., "align_and_analyze")
+        
+        Returns:
+            Summary message with file paths for agents to use
+        """
+        import json
+        import os
+        from datetime import datetime
+        
+        if not result or (isinstance(result, str) and result.startswith("Error")):
+            return result
+        
+        try:
+            # Parse MCP-wrapped JSON
+            actual_json = result
+            if isinstance(result, dict) and 'content' in result:
+                if len(result['content']) > 0 and 'text' in result['content'][0]:
+                    actual_json = result['content'][0]['text']
+            elif isinstance(result, str) and result.startswith('{'):
+                temp_parsed = json.loads(result)
+                if isinstance(temp_parsed, dict) and 'content' in temp_parsed:
+                    if len(temp_parsed['content']) > 0 and 'text' in temp_parsed['content'][0]:
+                        actual_json = temp_parsed['content'][0]['text']
+            
+            if isinstance(actual_json, str):
+                parsed = json.loads(actual_json)
+            else:
+                parsed = actual_json
+            
+            if not isinstance(parsed, dict) or not parsed.get("success"):
+                return result
+            
+            # Determine save location based on run_dir
+            if self.run_dir:
+                phase_dir = os.path.join(self.run_dir, "phase3")
+                os.makedirs(phase_dir, exist_ok=True)
+            else:
+                phase_dir = "/results/alignments"
+                os.makedirs(phase_dir, exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            input_file = kwargs.get("fasta_file", "unknown")
+            taxon = self._extract_taxon_from_filename(input_file)
+            
+            saved_files = []
+            
+            # Save alignment if present
+            if "alignment" in parsed and isinstance(parsed["alignment"], str):
+                alignment_file = os.path.join(phase_dir, f"{taxon}_alignment_{timestamp}.fasta")
+                with open(alignment_file, 'w') as f:
+                    f.write(parsed["alignment"])
+                saved_files.append({"path": alignment_file, "type": "alignment", "field": "alignment"})
+                logger.info(f"[ALIGNMENT] Saved alignment to: {alignment_file}")
+            
+            # Save phylogeny if present  
+            if "phylogeny" in parsed and isinstance(parsed["phylogeny"], dict):
+                tree_file = os.path.join(phase_dir, f"{taxon}_tree_{timestamp}.nwk")
+                tree_content = parsed["phylogeny"].get("tree", parsed["phylogeny"].get("newick", ""))
+                if tree_content:
+                    with open(tree_file, 'w') as f:
+                        f.write(tree_content)
+                    saved_files.append({"path": tree_file, "type": "phylogeny", "field": "phylogeny"})
+                    logger.info(f"[ALIGNMENT] Saved phylogeny to: {tree_file}")
+            
+            # Save distance matrix if present
+            if "distances" in parsed and isinstance(parsed["distances"], dict):
+                distance_file = os.path.join(phase_dir, f"{taxon}_distances_{timestamp}.json")
+                with open(distance_file, 'w') as f:
+                    json.dump(parsed["distances"], f, indent=2)
+                saved_files.append({"path": distance_file, "type": "distances", "field": "distances"})
+                logger.info(f"[ALIGNMENT] Saved distances to: {distance_file}")
+            
+            if not saved_files:
+                logger.warning("[ALIGNMENT] No alignment data found in result")
+                return result
+            
+            # Update manifest
+            if self.run_dir and self.manifest and "phases" in self.manifest:
+                for file_info in saved_files:
+                    try:
+                        # Build metadata (exclude large content fields)
+                        large_fields = ["alignment", "phylogeny", "distances", "processed_fasta", "fasta_content"]
+                        metadata = {
+                            "input_file": input_file,
+                            "taxon": taxon,
+                            **{k: v for k, v in kwargs.items() if k not in ["fasta_file", "fasta_content"]},
+                            **{k: v for k, v in parsed.items() if k not in large_fields and not k.endswith("_content")}
+                        }
+                        
+                        self._update_manifest_artifact(
+                            phase="phase3",
+                            artifact_path=file_info["path"],
+                            artifact_type=file_info["type"],
+                            metadata=metadata
+                        )
+                    except Exception as e:
+                        logger.warning(f"[ALIGNMENT] Failed to update manifest: {e}")
+            
+            # Generate summary
+            algorithm = kwargs.get("algorithm", "unknown")
+            summary_parts = [f"✓ Alignment and analysis complete using {algorithm}!"]
+            summary_parts.append(f"\n**Input:** {input_file}")
+            
+            file_labels = {
+                "alignment": "Alignment file",
+                "phylogeny": "Phylogenetic tree",
+                "distances": "Distance matrix"
+            }
+            
+            for file_info in saved_files:
+                label = file_labels.get(file_info["type"], file_info["type"])
+                summary_parts.append(f"\n**{label}:** {file_info['path']}")
+            
+            # Add statistics summary
+            if "alignment_statistics" in parsed:
+                stats = parsed["alignment_statistics"]
+                summary_parts.append(f"\n\n**Alignment Statistics:**")
+                summary_parts.append(f"- Sequences: {stats.get('num_sequences', 'unknown')}")
+                summary_parts.append(f"- Length: {stats.get('alignment_length', 'unknown')}bp")
+                summary_parts.append(f"- Average conservation: {stats.get('average_conservation', 0):.1%}")
+            
+            summary_parts.append("\n\n**IMPORTANT:** Use these exact paths for primer design steps.")
+            summary_parts.append("\nThe aligned sequences and phylogenetic analysis are ready for identifying signature regions.")
+            
+            return ''.join(summary_parts)
+            
+        except Exception as e:
+            logger.error(f"[ALIGNMENT] Error handling alignment result: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return result
+
+    def _create_function_maps(self, mcp_functions: Dict[str, Callable]) -> Dict[str, Dict[str, Callable]]:
+        """
+        Create function maps for each agent based on 4-agent architecture.
+        
+        Args:
+            mcp_functions: Dictionary of MCP function wrappers
+            
+        Returns:
+            Dictionary containing function maps for each agent:
+            - database_function_map: 5 database tools
+            - analyst_function_map: 10 tools (5 processing + 5 alignment)
+            - primer_design_function_map: 0 tools (Phase 4 pending)
+        """
+        database_function_map = {
+            # Database tools - pure data retrieval (5 tools)
             "get_sequences": mcp_functions["get_sequences"],
             "get_taxonomy": mcp_functions["get_taxonomy"],
             "get_neighbors": mcp_functions["get_neighbors"],
             "extract_sequence_columns": mcp_functions["extract_sequence_columns"],
             "search_sra_studies": mcp_functions["search_sra_studies"],
-            # Processing tools
+        }
+
+        analyst_function_map = {
+            # Processing tools - sequence curation and QC (5 tools)
             "fasta_qc": mcp_functions["fasta_qc"],
             "dereplicate_sequences": mcp_functions["dereplicate_sequences"],
             "mask_low_complexity": mcp_functions["mask_low_complexity"],
             "detect_chimeras": mcp_functions["detect_chimeras"],
             "process_sequences": mcp_functions["process_sequences"],
+            # Alignment tools - sequence analysis (5 tools)
+            "align_sequences": mcp_functions["align_sequences"],
+            "process_alignment": mcp_functions["process_alignment"],
+            "build_phylogeny": mcp_functions["build_phylogeny"],
+            "calculate_distances": mcp_functions["calculate_distances"],
+            "align_and_analyze": mcp_functions["align_and_analyze"],
+        }
+        
+        primer_design_function_map = {
+            # Phase 4 tools will be added here (5 tools planned):
+            # "find_signature_regions": mcp_functions["find_signature_regions"],
+            # "design_primers": mcp_functions["design_primers"],
+            # "validate_primers": mcp_functions["validate_primers"],
+            # "insilico_pcr": mcp_functions["insilico_pcr"],
+            # "blast_primers": mcp_functions["blast_primers"],
         }
 
-        # 1. Coordinator Agent
-        self.agents["coordinator"] = AssistantAgent(
-            name="Coordinator",
-            system_message=COORDINATOR_SYSTEM_MESSAGE,
-            llm_config=self.llm_config
-        )
+        return {
+            "database": database_function_map,
+            "analyst": analyst_function_map,
+            "primer_design": primer_design_function_map,
+        }
 
-        # 2. Database Agent (with MCP tools)
-        # CRITICAL FIX: Create specialized llm_config with function schemas
-        # This tells the LLM which functions are available so it can generate proper function calls
-        database_llm_config = self._build_database_agent_llm_config()
+    def _validate_agent_function_registration(
+        self, 
+        agent_name: str, 
+        llm_config: Dict[str, Any], 
+        function_map: Dict[str, Callable]
+    ) -> None:
+        """
+        Validate that function schemas in llm_config match registered handlers in function_map.
         
-        self.agents["database"] = AssistantAgent(
-            name="DatabaseAgent",
-            system_message=DATABASE_AGENT_SYSTEM_MESSAGE,
-            llm_config=database_llm_config  # ← Now includes function schemas
-        )
+        Args:
+            agent_name: Name of the agent being validated
+            llm_config: LLM configuration containing function schemas
+            function_map: Dictionary of registered function handlers
+        """
+        if "functions" not in llm_config:
+            logger.debug(f"{agent_name}: No function schemas in llm_config (expected for agents without tools)")
+            return
 
-        # Register functions with DatabaseAgent for execution
-        # This provides the actual execution handlers when LLM generates function calls
-        self.agents["database"].register_function(
-            function_map=function_map
-        )
-        
-        # Verify function registration
-        logger.info(f"DatabaseAgent registered functions: {list(function_map.keys())}")
-        logger.debug(f"DatabaseAgent function_map keys: {list(self.agents['database']._function_map.keys()) if hasattr(self.agents['database'], '_function_map') else 'N/A'}")
-        
-        # Validate that function schemas match execution handlers
-        schema_names = {f["name"] for f in database_llm_config["functions"]}
+        schema_names = {f["name"] for f in llm_config["functions"]}
         handler_names = set(function_map.keys())
+        
         if schema_names == handler_names:
-            logger.info(f"✓ Function schemas and handlers match: {sorted(schema_names)}")
+            logger.info(f"✓ {agent_name}: Function schemas and handlers match ({len(schema_names)} tools)")
+            logger.debug(f"  Tools: {sorted(schema_names)}")
         else:
             missing_handlers = schema_names - handler_names
             extra_handlers = handler_names - schema_names
             if missing_handlers:
-                logger.warning(f"⚠️  Function schemas without handlers: {missing_handlers}")
+                logger.warning(f"⚠️  {agent_name}: Function schemas without handlers: {missing_handlers}")
             if extra_handlers:
-                logger.warning(f"⚠️  Function handlers without schemas: {extra_handlers}")
+                logger.warning(f"⚠️  {agent_name}: Function handlers without schemas: {extra_handlers}")
 
-        # 3. Analysis Agent
-        self.agents["analyst"] = AssistantAgent(
-            name="AnalystAgent",
-            system_message=ANALYST_SYSTEM_MESSAGE,
+    def _create_coordinator_agent(self) -> AssistantAgent:
+        """
+        Create Coordinator agent (no tools - orchestration only).
+        
+        Returns:
+            Configured CoordinatorAgent
+        """
+        coordinator = AssistantAgent(
+            name="Coordinator",
+            system_message=COORDINATOR_SYSTEM_MESSAGE,
             llm_config=self.llm_config
         )
+        logger.info("Created Coordinator agent (orchestration, no tools)")
+        return coordinator
 
-        # 4. User Proxy (for termination and user interaction)
-        self.agents["user_proxy"] = UserProxyAgent(
-            name="User",
-            human_input_mode="NEVER",  # Don't ask for user input during workflow
-            max_consecutive_auto_reply=50,  # Allow more interactions
-            is_termination_msg=self._is_termination_message,
-            code_execution_config=False,
-            function_map=function_map,  # Register functions with user proxy for execution
+    def _create_database_agent(self, function_map: Dict[str, Callable]) -> AssistantAgent:
+        """
+        Create DatabaseAgent with database retrieval tools.
+        
+        Args:
+            function_map: Dictionary of database tool handlers (5 tools)
+            
+        Returns:
+            Configured DatabaseAgent with registered functions
+        """
+        # Build specialized llm_config with function schemas
+        llm_config = self._build_database_agent_llm_config()
+        
+        # Create agent
+        database_agent = AssistantAgent(
+            name="DatabaseAgent",
+            system_message=DATABASE_AGENT_SYSTEM_MESSAGE,
+            llm_config=llm_config
         )
 
-        # Create group chat
-        max_rounds = int(os.getenv("AUTOGEN_MAX_ROUNDS", "20"))  # Use environment variable or default to 20
-        logger.info(f"Setting max_rounds to {max_rounds} (from AUTOGEN_MAX_ROUNDS env var)")
-        self.groupchat = GroupChat(
+        # Register function handlers
+        database_agent.register_function(function_map=function_map)
+        
+        # Validate registration
+        self._validate_agent_function_registration("DatabaseAgent", llm_config, function_map)
+        
+        return database_agent
+
+    def _create_analyst_agent(self, function_map: Dict[str, Callable]) -> AssistantAgent:
+        """
+        Create AnalystAgent with processing and alignment tools.
+        
+        Args:
+            function_map: Dictionary of processing + alignment tool handlers (10 tools)
+            
+        Returns:
+            Configured AnalystAgent with registered functions
+        """
+        # Build specialized llm_config with function schemas
+        llm_config = self._build_analyst_agent_llm_config()
+        
+        # Create agent
+        analyst_agent = AssistantAgent(
+            name="AnalystAgent",
+            system_message=ANALYST_SYSTEM_MESSAGE,
+            llm_config=llm_config
+        )
+
+        # Register function handlers
+        analyst_agent.register_function(function_map=function_map)
+        
+        # Validate registration
+        self._validate_agent_function_registration("AnalystAgent", llm_config, function_map)
+        
+        return analyst_agent
+
+    def _create_primer_design_agent(self, function_map: Dict[str, Callable]) -> AssistantAgent:
+        """
+        Create PrimerDesignAgent (advisory mode - Phase 4 tools pending).
+        
+        Args:
+            function_map: Dictionary of primer design tool handlers (0 tools currently)
+            
+        Returns:
+            Configured PrimerDesignAgent
+        """
+        # No specialized llm_config yet - Phase 4 will add function schemas
+        primer_agent = AssistantAgent(
+            name="PrimerDesignAgent",
+            system_message=PRIMER_DESIGN_AGENT_SYSTEM_MESSAGE,
+            llm_config=self.llm_config
+        )
+        
+        # Register functions if available (empty dict for now)
+        if function_map:
+            primer_agent.register_function(function_map=function_map)
+            logger.info(f"PrimerDesignAgent created with {len(function_map)} tools")
+        else:
+            logger.info("PrimerDesignAgent created in advisory mode (Phase 4 tools pending)")
+        
+        return primer_agent
+
+    def _create_user_proxy_agent(self, all_functions: Dict[str, Callable]) -> UserProxyAgent:
+        """
+        Create UserProxyAgent for termination and tool execution.
+        
+        Args:
+            all_functions: Combined function map from all agents
+            
+        Returns:
+            Configured UserProxyAgent
+        """
+        user_proxy = UserProxyAgent(
+            name="User",
+            human_input_mode="NEVER",
+            max_consecutive_auto_reply=50,
+            is_termination_msg=self._is_termination_message,
+            code_execution_config=False,
+            function_map=all_functions,
+        )
+        logger.info(f"Created UserProxyAgent with access to {len(all_functions)} tools")
+        return user_proxy
+
+    def _create_group_chat_and_manager(self) -> tuple:
+        """
+        Create GroupChat and GroupChatManager for multi-agent coordination.
+        
+        Returns:
+            Tuple of (GroupChat, GroupChatManager)
+        """
+        max_rounds = int(os.getenv("AUTOGEN_MAX_ROUNDS", "50"))
+        
+        groupchat = GroupChat(
             agents=[
                 self.agents["coordinator"],
                 self.agents["database"],
                 self.agents["analyst"],
+                self.agents["primer_design"],
                 self.agents["user_proxy"]
             ],
             messages=[],
-            max_round=max_rounds,  # Use environment variable for max rounds
-            speaker_selection_method="auto",  # Let LLM decide next speaker
-            allow_repeat_speaker=False,  # Prevent infinite loops
+            max_round=max_rounds,
+            speaker_selection_method="auto",
+            allow_repeat_speaker=False,
         )
 
-        # Create group chat manager
-        self.manager = GroupChatManager(
-            groupchat=self.groupchat,
+        manager = GroupChatManager(
+            groupchat=groupchat,
             llm_config=self.llm_config
         )
-
-        logger.info(f"Created {len(self.agents)} agents")
         
-        # Test function availability (optional - only log, don't fail)
-        try:
-            test_func = function_map.get("get_taxonomy")
-            if test_func and callable(test_func):
-                logger.info("✓ Function registration test: get_taxonomy is callable")
-            else:
-                logger.warning("⚠ Function registration test: get_taxonomy is NOT callable")
-        except Exception as e:
-            logger.warning(f"Function registration test failed (non-critical): {e}")
+        logger.info(f"Created GroupChat with {len(groupchat.agents)} agents (max {max_rounds} rounds)")
+        
+        return groupchat, manager
+
+    def _display_agent_summary(self, function_maps: Dict[str, Dict[str, Callable]]) -> None:
+        """
+        Display summary of created agents and their tool allocations.
+        
+        Args:
+            function_maps: Dictionary of function maps for each agent
+        """
+        total_tools = sum(len(fm) for fm in function_maps.values())
+        
+        logger.info(f"✓ Created 4 specialized agents with {total_tools} total MCP tools:")
+        logger.info(f"  • Coordinator: 0 tools (orchestration)")
+        logger.info(f"  • DatabaseAgent: {len(function_maps['database'])} tools (data retrieval)")
+        logger.info(f"  • AnalystAgent: {len(function_maps['analyst'])} tools (processing + alignment)")
+        logger.info(f"  • PrimerDesignAgent: {len(function_maps['primer_design'])} tools (Phase 4 pending)")
+
+    def _create_agents(self):
+        """
+        Create AutoGen agent team following 4-agent architecture.
+        
+        Architecture:
+        - Coordinator: Workflow planning and orchestration (0 tools)
+        - DatabaseAgent: Data retrieval from public databases (5 tools)
+        - AnalystAgent: Data curation and analysis (10 tools: 5 processing + 5 alignment)
+        - PrimerDesignAgent: Primer design and validation (0 tools - Phase 4 pending)
+        - UserProxyAgent: Termination and tool execution coordination
+        
+        Raises:
+            RuntimeError: If MCP executor not initialized
+        """
+        # Verify MCP bridge is initialized
+        if not self.mcp_executor:
+            raise RuntimeError("MCP executor not initialized. Call _setup_mcp_bridge() first.")
+        
+        logger.info("Initializing 4-agent qPCR design system...")
+
+        # Display model information
+        model_info = self.config_list[0] if self.config_list else {}
+        model_name = self.model_name or model_info.get("model", "unknown")
+        api_type = model_info.get("api_type", "unknown")
+        model_display = MODEL_DISPLAY_NAMES.get(model_name, f"{api_type.upper()} - {model_name}")
+        print_colored(f"🤖 Using {model_display}", Colors.BRIGHT_GREEN)
+
+        # Step 1: Create MCP function wrappers
+        mcp_functions = self._create_mcp_function_wrappers()
+        logger.debug(f"Created {len(mcp_functions)} MCP function wrappers")
+
+        # Step 2: Create function maps for each agent
+        function_maps = self._create_function_maps(mcp_functions)
+
+        # Step 3: Create specialized agents
+        self.agents["coordinator"] = self._create_coordinator_agent()
+        self.agents["database"] = self._create_database_agent(function_maps["database"])
+        self.agents["analyst"] = self._create_analyst_agent(function_maps["analyst"])
+        self.agents["primer_design"] = self._create_primer_design_agent(function_maps["primer_design"])
+        
+        # Step 4: Create user proxy with all functions
+        all_functions = {
+            **function_maps["database"],
+            **function_maps["analyst"],
+            **function_maps["primer_design"]
+        }
+        self.agents["user_proxy"] = self._create_user_proxy_agent(all_functions)
+
+        # Step 5: Create group chat and manager
+        self.groupchat, self.manager = self._create_group_chat_and_manager()
+
+        # Step 6: Display summary
+        self._display_agent_summary(function_maps)
 
     def health_check(self) -> Dict[str, Any]:
         """
@@ -890,45 +1979,141 @@ Do NOT request the full sequence content - it's already saved."""
     def _is_termination_message(self, message: Dict[str, Any]) -> bool:
         """
         Enhanced termination condition to prevent infinite loops and handle task completion.
-        
+
         Args:
             message: The message to check for termination
-            
+
         Returns:
             True if the conversation should terminate
         """
         content = message.get("content", "").rstrip()
         sender = message.get("name", "unknown")
+
+        # Parse intent footer from message
+        intent_info = self._parse_intent_footer(content, sender)
+
+        # CRITICAL: Detect empty messages from User (AutoGen loop bug)
+        # When Coordinator sends TERMINATE, AutoGen may select User with empty message
+        # This causes an infinite loop - terminate immediately when User has no content
+        if sender == "User" and not content:
+            logger.warning("[TERMINATION] Detected empty User message - forcing termination to prevent loop")
+            self._log_termination_reason("EMPTY_USER_MESSAGE", "Empty message from User after TERMINATE", sender)
+            return True
+
+        # CRITICAL: Check if TERMINATE was sent in recent messages (AutoGen loop bug)
+        # If Coordinator sent TERMINATE recently and another agent is now speaking, terminate immediately
+        # This catches the race condition where speaker selection happens before termination check
+        if sender != "Coordinator" and hasattr(self, 'groupchat') and self.groupchat and len(self.groupchat.messages) > 1:
+            # Check last 3 messages for TERMINATE from Coordinator
+            recent_messages = self.groupchat.messages[-3:]
+            for msg in recent_messages:
+                if (isinstance(msg, dict) and 
+                    msg.get("name") == "Coordinator" and 
+                    msg.get("content", "").rstrip().endswith("TERMINATE")):
+                    logger.warning(f"[TERMINATION] Coordinator sent TERMINATE recently, but {sender} is trying to respond")
+                    logger.warning(f"  This is the AutoGen GroupChat bug - speaker selected after TERMINATE")
+                    logger.warning(f"  FORCING TERMINATION to prevent loop")
+                    self._log_termination_reason("TERMINATE_AFTER_COORDINATOR", f"Agent {sender} selected after Coordinator TERMINATE", sender)
+                    return True
+
+        # CRITICAL: Check if message contains a function call (work is continuing)
+        # AutoGen/AG2 stores function calls in 'function_call' or 'tool_calls' field
+        if message.get("function_call") or message.get("tool_calls"):
+            logger.info(f"Message from {sender} contains function call - allowing execution")
+            return False
         
-        # 0. WORKFLOW ENFORCEMENT: Check if processing was done before allowing termination
-        # This prevents premature termination when sequences are retrieved but not processed
+        # 0. WORKFLOW ENFORCEMENT: Ensure complete 4-phase workflow before termination
+        # Prevents premature termination at any phase
         if hasattr(self, 'task_logger') and self.task_logger and self.task_logger.task_log:
             tool_calls = self.task_logger.task_log[0].get("tool_calls", [])
-            # Check for SUCCESSFUL retrieval and processing (not just attempts)
+            
+            # Check for SUCCESSFUL completion of each phase
             has_successful_retrieval = any(
                 "get_sequences" == tc.get("tool") and tc.get("success", False) 
                 for tc in tool_calls
             )
             has_processing = any(
                 tc.get("tool") in ["fasta_qc", "process_sequences", "dereplicate_sequences", 
-                                   "mask_low_complexity", "detect_chimeras"] 
+                                   "mask_low_complexity", "detect_chimeras"] and tc.get("success", False)
+                for tc in tool_calls
+            )
+            has_alignment = any(
+                tc.get("tool") in ["align_sequences", "align_and_analyze"] and tc.get("success", False)
+                for tc in tool_calls
+            )
+            has_phylogeny = any(
+                tc.get("tool") in ["build_phylogeny", "calculate_distances", "align_and_analyze"] and tc.get("success", False)
                 for tc in tool_calls
             )
             
-            # If sequences were SUCCESSFULLY retrieved but not processed, don't allow termination yet
+            # PHASE 1: If sequences retrieved but not processed, don't terminate
             if has_successful_retrieval and not has_processing and content.endswith("TERMINATE"):
-                logger.warning(f"Preventing premature termination from {sender} - sequences retrieved but not processed yet")
-                logger.warning(f"Tool calls so far: retrieval={has_successful_retrieval}, processing={has_processing}")
-                # Don't terminate - let the workflow continue
+                logger.warning(f"[WORKFLOW] Preventing termination - Phase 1 complete but Phase 2 (processing) not started")
+                logger.warning(f"  retrieval={has_successful_retrieval}, processing={has_processing}")
                 return False
+            
+            # PHASE 2: If processing done but no alignment, don't terminate
+            if has_processing and not has_alignment and content.endswith("TERMINATE"):
+                logger.warning(f"[WORKFLOW] Preventing termination - Phase 2 (processing) complete but Phase 2b (alignment) not started")
+                logger.warning(f"  processing={has_processing}, alignment={has_alignment}")
+                return False
+            
+            # PHASE 3: If alignment done but no phylogeny, don't terminate  
+            if has_alignment and not has_phylogeny and content.endswith("TERMINATE"):
+                logger.warning(f"[WORKFLOW] Preventing termination - Alignment complete but phylogenetic analysis not done")
+                logger.warning(f"  alignment={has_alignment}, phylogeny={has_phylogeny}")
+                return False
+            
+            # Log workflow progress
+            if has_successful_retrieval or has_processing or has_alignment or has_phylogeny:
+                logger.info(f"[WORKFLOW] Phase completion: Retrieval={has_successful_retrieval}, Processing={has_processing}, Alignment={has_alignment}, Phylogeny={has_phylogeny}")
         
         # 1. Explicit termination condition (highest priority)
+        # CRITICAL: Only Coordinator can issue TERMINATE command
         if content.endswith("TERMINATE"):
-            logger.info(f"Explicit termination message detected from {sender}: 'TERMINATE'")
+            if sender != "Coordinator":
+                logger.warning(f"[SECURITY] Non-Coordinator agent '{sender}' attempted to TERMINATE - REJECTING")
+                logger.warning(f"  Only Coordinator can issue TERMINATE to prevent premature workflow termination")
+                return False
+            
+            # Check if this is a repeated TERMINATE (AutoGen loop bug)
+            if hasattr(self, 'groupchat') and self.groupchat and len(self.groupchat.messages) > 2:
+                recent_messages = self.groupchat.messages[-5:]  # Check last 5 messages
+                terminate_count = sum(1 for msg in recent_messages 
+                                     if isinstance(msg, dict) 
+                                     and msg.get("content", "").rstrip().endswith("TERMINATE")
+                                     and msg.get("name") == "Coordinator")
+                
+                if terminate_count > 1:
+                    logger.error(f"[TERMINATION] Coordinator sent TERMINATE {terminate_count} times in last 5 messages!")
+                    logger.error(f"  This indicates AutoGen GroupChat is not respecting termination signal")
+                    logger.error(f"  FORCING TERMINATION to break infinite loop")
+                    self._log_termination_reason("REPEATED_TERMINATE", f"TERMINATE sent {terminate_count} times", sender)
+                    return True
+            
+            logger.info(f"Explicit termination message detected from Coordinator: 'TERMINATE'")
             self._log_termination_reason("EXPLICIT_TERMINATE", content, sender)
             return True
             
-        # 2. Check for repetitive messages (loop detection)
+        # 2. LOOP DETECTION: Check if same tool called too many times
+        if hasattr(self, 'task_logger') and self.task_logger and self.task_logger.task_log:
+            tool_calls = self.task_logger.task_log[0].get("tool_calls", [])
+            # Count occurrences of each tool
+            tool_counts = {}
+            for tc in tool_calls:
+                tool_name = tc.get("tool", "")
+                tool_counts[tool_name] = tool_counts.get(tool_name, 0) + 1
+            
+            # If any tool was called >10 times, it's a loop - force termination
+            for tool_name, count in tool_counts.items():
+                if count > 10:
+                    logger.error(f"[LOOP DETECTED] Tool '{tool_name}' called {count} times - likely infinite loop!")
+                    logger.error(f"  This usually means the agent is stuck and not progressing to the next phase")
+                    logger.error(f"  Forcing termination to prevent further waste")
+                    self._log_termination_reason("INFINITE_LOOP_DETECTED", f"Tool {tool_name} called {count} times", sender)
+                    return True
+        
+        # 3. Check for repetitive messages (content-based loop detection)
         if hasattr(self, 'groupchat') and self.groupchat and len(self.groupchat.messages) > 5:
             recent_messages = self.groupchat.messages[-8:]  # Last 8 messages
             if len(recent_messages) >= 6:
@@ -941,21 +2126,42 @@ Do NOT request the full sequence content - it's already saved."""
                     return True
                     
         # 3. Check for task completion indicators
+        # CRITICAL: Only terminate on EXPLICIT completion indicators
+        # DO NOT terminate on phase completions (e.g., "sequences retrieved", "data collection complete")
+        # DO NOT terminate if agent is announcing next actions or suggesting function calls
         completion_phrases = [
+            "all phases complete",
+            "all 4 phases complete", 
+            "complete 4-phase workflow finished",
             "workflow completed",
-            "task completed", 
-            "design completed",
-            "analysis completed",
-            "project completed",
-            "experimental validation phase",
-            "ready to advance",
-            "data collection complete",
-            "sequences retrieved",
-            "primer design complete",
-            "assay design complete"
+            "primer design complete and validated",
+            "assay design complete and validated",
+            "ready for wet lab implementation"
         ]
         
         content_lower = content.lower()
+        
+        # Check if agent is suggesting a function call (work is continuing)
+        if "suggested function call" in content_lower or "function call:" in content_lower:
+            logger.info(f"Agent {sender} suggesting function call - workflow continuing")
+            return False
+        
+        # Check if agent is announcing next steps (work is continuing)
+        continuation_indicators = [
+            "i will initiate",
+            "i will proceed",
+            "let's start",
+            "let's initiate",
+            "next steps:",
+            "proceeding to",
+            "will now perform"
+        ]
+        for indicator in continuation_indicators:
+            if indicator in content_lower:
+                logger.info(f"Agent {sender} announcing continuation: '{indicator}' - allowing workflow to proceed")
+                return False
+        
+        # Only check completion phrases if no continuation indicators found
         for phrase in completion_phrases:
             if phrase in content_lower:
                 logger.info(f"Task completion phrase detected from {sender}: '{phrase}'")
@@ -982,7 +2188,7 @@ Do NOT request the full sequence content - it's already saved."""
         # 5. Check conversation length (safety net)
         if hasattr(self, 'groupchat') and self.groupchat:
             current_rounds = len(self.groupchat.messages)
-            max_rounds = int(os.getenv("AUTOGEN_MAX_ROUNDS", "20"))
+            max_rounds = int(os.getenv("AUTOGEN_MAX_ROUNDS", "50"))
             if current_rounds >= max_rounds - 2:  # Stop 2 rounds before max
                 logger.warning(f"Approaching maximum rounds ({current_rounds}/{max_rounds}) - terminating conversation")
                 self._log_termination_reason("MAX_ROUNDS_APPROACHING", content, sender)
@@ -990,6 +2196,109 @@ Do NOT request the full sequence content - it's already saved."""
                 
         return False
     
+    def _filter_pii_from_metadata(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Filter PII (Personally Identifiable Information) from metadata.
+
+        Removes fields that may contain:
+        - Submitter names
+        - Email addresses
+        - Institution names
+        - Contact information
+
+        Args:
+            metadata: Raw metadata dictionary
+
+        Returns:
+            Filtered metadata with PII removed
+        """
+        # PII fields to remove (case-insensitive)
+        pii_fields = {
+            "submitter", "submitted_by", "author", "authors",
+            "email", "contact", "contact_email", "contact_person",
+            "institution", "organization", "lab", "laboratory",
+            "address", "phone", "fax",
+            "principal_investigator", "pi", "researcher"
+        }
+
+        # Create filtered copy
+        filtered = {}
+        for key, value in metadata.items():
+            key_lower = key.lower()
+
+            # Skip if key matches PII field
+            if key_lower in pii_fields:
+                logger.debug(f"[PII] Filtered field: {key}")
+                continue
+
+            # Skip if key contains PII-related words
+            if any(pii_word in key_lower for pii_word in ["submitter", "author", "email", "contact", "institution"]):
+                logger.debug(f"[PII] Filtered field: {key}")
+                continue
+
+            filtered[key] = value
+
+        if len(filtered) < len(metadata):
+            logger.info(f"[PII] Filtered {len(metadata) - len(filtered)} PII fields from metadata")
+
+        return filtered
+
+    def _parse_intent_footer(self, content: str, sender: str) -> Dict[str, Optional[str]]:
+        """
+        Parse intent footer from agent message.
+
+        Expected format:
+        # intent: <handoff|continue|terminate|error>
+        # next_agent: <Coordinator|DatabaseAgent|AnalystAgent|PrimerDesignAgent|none>
+
+        Args:
+            content: Message content
+            sender: Agent name sending the message
+
+        Returns:
+            Dict with 'intent' and 'next_agent' keys (None if not found)
+        """
+        import re
+
+        intent = None
+        next_agent = None
+
+        # Extract intent
+        intent_match = re.search(r'#\s*intent:\s*(\w+)', content, re.IGNORECASE)
+        if intent_match:
+            intent = intent_match.group(1).lower()
+
+        # Extract next_agent
+        next_agent_match = re.search(r'#\s*next_agent:\s*(\w+)', content, re.IGNORECASE)
+        if next_agent_match:
+            next_agent = next_agent_match.group(1)
+
+        # Validate intent
+        valid_intents = ["handoff", "continue", "terminate", "error"]
+        if intent and intent not in valid_intents:
+            logger.warning(f"[INTENT] Invalid intent '{intent}' from {sender} - expected one of {valid_intents}")
+            intent = None
+
+        # Validate next_agent
+        valid_agents = ["Coordinator", "DatabaseAgent", "AnalystAgent", "PrimerDesignAgent", "none"]
+        if next_agent and next_agent not in valid_agents:
+            logger.warning(f"[INTENT] Invalid next_agent '{next_agent}' from {sender} - expected one of {valid_agents}")
+            next_agent = None
+
+        # Log intent if found
+        if intent or next_agent:
+            logger.info(f"[INTENT] {sender} → intent={intent}, next_agent={next_agent}")
+
+        # Validate intent-sender combination
+        if intent == "terminate" and sender != "Coordinator":
+            logger.warning(f"[INTENT] Non-Coordinator {sender} declared intent:terminate - this is invalid")
+            logger.warning(f"  Only Coordinator can declare terminate intent")
+
+        return {
+            "intent": intent,
+            "next_agent": next_agent
+        }
+
     def _log_termination_reason(self, reason: str, content: str, sender: str):
         """Log the reason for termination with context."""
         termination_info = {
@@ -1050,20 +2359,16 @@ Do NOT request the full sequence content - it's already saved."""
                     'timestamp': datetime.now().isoformat()
                 }
             
-            # 2. Task completion phrases
+            # 2. Task completion phrases (strict - avoid false positives)
             content_lower = content.lower()
             completion_phrases = [
+                "all phases complete",
+                "all 4 phases complete",
+                "complete 4-phase workflow finished",
                 "workflow completed",
-                "task completed",
-                "design completed",
-                "analysis completed",
-                "project completed",
-                "experimental validation phase",
-                "ready to advance",
-                "data collection complete",
-                "sequences retrieved",
-                "primer design complete",
-                "assay design complete"
+                "primer design complete and validated",
+                "assay design complete and validated",
+                "ready for wet lab implementation"
             ]
             
             for phrase in completion_phrases:
@@ -1075,7 +2380,7 @@ Do NOT request the full sequence content - it's already saved."""
                     }
         
         # 3. Check if max rounds was reached
-        max_rounds = int(os.getenv("AUTOGEN_MAX_ROUNDS", "20"))
+        max_rounds = int(os.getenv("AUTOGEN_MAX_ROUNDS", "50"))
         if len(messages) >= max_rounds:
             return {
                 'reason': 'MAX_ROUNDS_REACHED',
@@ -1233,6 +2538,17 @@ Do NOT request the full sequence content - it's already saved."""
         if termination_reason == "EXPLICIT_TERMINATE":
             summary["next_steps"].append("Review the generated data files in /results/ directory")
             summary["next_steps"].append("Proceed with experimental validation of recommended primers")
+        elif termination_reason == "REPEATED_TERMINATE":
+            summary["next_steps"].append("⚠️  Conversation terminated due to repeated TERMINATE messages (AutoGen loop bug)")
+            summary["next_steps"].append("Review results in /results/ directory - workflow likely completed successfully")
+            summary["next_steps"].append("If workflow incomplete, restart with clearer objectives")
+        elif termination_reason == "TERMINATE_AFTER_COORDINATOR":
+            summary["next_steps"].append("⚠️  Agent attempted to respond after Coordinator TERMINATE (AutoGen loop bug)")
+            summary["next_steps"].append("Review results in /results/ directory - workflow likely completed successfully")
+            summary["next_steps"].append("This is expected behavior when AutoGen selects speakers before checking termination")
+        elif termination_reason == "EMPTY_USER_MESSAGE":
+            summary["next_steps"].append("⚠️  Conversation terminated due to empty User message after TERMINATE")
+            summary["next_steps"].append("Review results in /results/ directory - workflow likely completed")
         elif termination_reason == "TASK_COMPLETION":
             summary["next_steps"].append("Data collection phase completed successfully")
             summary["next_steps"].append("Ready to advance to primer design and validation phase")
@@ -1263,6 +2579,9 @@ Do NOT request the full sequence content - it's already saved."""
         reason_colors = {
             "EXPLICIT_TERMINATE": Colors.GREEN,
             "TASK_COMPLETION": Colors.GREEN,
+            "REPEATED_TERMINATE": Colors.YELLOW,  # Warning but likely successful
+            "TERMINATE_AFTER_COORDINATOR": Colors.YELLOW,  # Warning but likely successful
+            "EMPTY_USER_MESSAGE": Colors.YELLOW,  # Warning but likely successful
             "ERROR_CONDITION": Colors.RED,
             "MAX_ROUNDS_APPROACHING": Colors.YELLOW,
             "MAX_ROUNDS_REACHED": Colors.YELLOW,
@@ -1300,7 +2619,17 @@ Do NOT request the full sequence content - it's already saved."""
             for step in summary["next_steps"]:
                 print(f"  • {step}")
             print()
-        
+
+        # Compliance disclaimer (automatically injected)
+        print_colored("⚠️  COMPLIANCE NOTICE", Colors.BRIGHT_YELLOW, bold=True)
+        print_colored("Research Use Only - Not for Clinical Diagnostics", Colors.YELLOW)
+        print()
+        print("This tool is designed for research and educational purposes.")
+        print("Results are NOT validated for clinical diagnostic use.")
+        print("For clinical applications, consult regulatory guidelines and")
+        print("conduct proper validation studies before implementation.")
+        print()
+
         print_colored("═══════════════════════════════════════════════════════════════════════════", Colors.CYAN)
         print()
 
@@ -1315,6 +2644,14 @@ Do NOT request the full sequence content - it's already saved."""
             List of messages from the conversation
         """
         logger.info("Starting qPCR design workflow...")
+
+        # Generate run_id and create directory structure
+        self.run_id = self._generate_run_id()
+        self._create_run_directory()
+
+        print_colored(f"🆔 Run ID: {self.run_id}", Colors.CYAN)
+        print_colored(f"📁 Results directory: {self.run_dir}", Colors.CYAN)
+        print()
 
         # Start logging session
         self.task_logger.start_session(user_message)

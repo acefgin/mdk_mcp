@@ -8,7 +8,7 @@ metadata:
 data:
   MCP_DATABASE_SERVER: "database-server-0.database-server"
   LOG_LEVEL: "INFO"
-  AUTOGEN_MAX_ROUNDS: "20"
+  AUTOGEN_MAX_ROUNDS: "50"
   AUTOGEN_TEMPERATURE: "0.7"
 
 ---

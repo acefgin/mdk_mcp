@@ -7,7 +7,7 @@
 
 An **MCP (Model Context Protocol)** based multi-agent AI system for designing species-specific qPCR assays for molecular diagnostics. The system uses AG2 (formerly AutoGen) to orchestrate specialized AI agents that collaborate to retrieve sequences, analyze data, and recommend primer design strategies.
 
-**🎉 Phase 2 Complete!** The system now includes comprehensive sequence processing capabilities with 16 total MCP tools available.
+**🎉 Phase 3 Complete!** The system now includes alignment and phylogenetic analysis capabilities with 21 total MCP tools available.
 
 ## 🎯 What is mdk_mcp?
 
@@ -160,33 +160,107 @@ Configuration is automatic via `autogen_app/OAI_CONFIG_LIST.json` - the system r
 
 ### 🤖 Multi-Agent Architecture
 
-Three specialized AI agents collaborate on qPCR design:
+Four specialized AI agents collaborate in a clear pipeline for qPCR design:
 
-| Agent | Role | Capabilities |
-|-------|------|-------------|
-| **Coordinator** | Project Manager | Analyzes requests, creates workflow plans, coordinates agents |
-| **DatabaseAgent** | Data Specialist | Retrieves and processes sequences using **10 MCP tools** (Phase 1 & 2) |
-| **AnalystAgent** | Biology Expert | Analyzes sequences, identifies signature regions, recommends primers |
+| Agent | Role | Capabilities | Tools | Phase |
+|-------|------|-------------|-------|-------|
+| **Coordinator** | Workflow Manager | Plans workflow, orchestrates agents, synthesizes results | 0 tools | Planning + Summary |
+| **DatabaseAgent** | Data Retrieval | Retrieves sequences from NCBI/BOLD/SILVA/UNITE/SRA | **5 tools*** | Phase 1: Retrieval |
+| **AnalystAgent** | Data Curator & Analyst | QC + processing + alignment + phylogenetics + quality assessment | **10 tools** | Phase 2: Curation |
+| **PrimerDesignAgent** | Primer Designer | Evaluates regions, designs primers, validation strategy | **0 tools**† | Phase 3: Design |
 
-### 🛠️ MCP Tools (16 Tools Available - Phases 1 & 2 Complete)
+\*DatabaseAgent: 5 tools active, 6 more planned (gget suite + advanced SRA)  
+†PrimerDesignAgent currently operates in advisory mode (Phase 4 tools coming soon)
 
-#### **Database Server** (Phase 1 ✅ - 11 Tools)
+**Architecture Rationale:**
+- **Clear Pipeline**: Data flows linearly through specialized agents (Retrieve → Curate → Design)
+- **Separation of Concerns**: Each agent has a single, focused responsibility
+- **Balanced Workload**: 5 vs 10 vs 0 tools (15 active total) - no agent is overloaded
+- **Quality Gates**: AnalystAgent assesses data quality before passing to primer design
+- **Scalable**: Easy to add tools to any agent without affecting others (6 database tools + 5 design tools planned)
+
+**Complete Workflow Pipeline:**
+
+```
+User Request
+    ↓
+┌─────────────────────┐
+│   Coordinator       │  Plans 4-phase workflow
+└──────────┬──────────┘
+           ↓
+┌─────────────────────┐
+│  DatabaseAgent      │  Phase 1: Data Retrieval (5 tools, 6 planned)
+│  - get_sequences    │  • Retrieve from NCBI/BOLD/SILVA/UNITE
+│  - get_taxonomy     │  • Verify species names
+│  - get_neighbors    │  • Identify off-targets
+└──────────┬──────────┘
+           │ Raw sequences (.fasta files)
+           ↓
+┌─────────────────────┐
+│  AnalystAgent       │  Phase 2: Complete Data Curation (10 tools)
+│  STEP 1: QC         │  • Quality control (fasta_qc)
+│  - process_sequences│  • Dereplicate, mask, detect chimeras
+│  STEP 2: Alignment  │  • Multiple sequence alignment (MAFFT/MUSCLE)
+│  - align_sequences  │  • Alignment cleaning (CIAlign)
+│  STEP 3: Phylogeny  │  • Build trees, calculate distances
+│  - build_phylogeny  │  • Assess evolutionary relationships
+│  STEP 4: Assessment │  • Evaluate data quality
+│  - Quality report   │  • Identify weak points
+│  STEP 5: Candidates │  • Find conserved regions (>90% target)
+│  - Region analysis  │  • Find variable regions (>30% off-target)
+└──────────┬──────────┘
+           │ Curated data + quality assessment + candidate regions
+           ↓
+┌─────────────────────┐
+│ PrimerDesignAgent   │  Phase 3: Primer Design & Validation (Advisory)
+│  - Evaluate regions │  • Assess candidate regions
+│  - Design strategy  │  • Recommend primer parameters
+│  - Validation plan  │  • In-silico validation strategy
+│  - Wet lab protocol│  • Comprehensive validation protocol
+└──────────┬──────────┘
+           │ Primer recommendations + validation protocol
+           ↓
+┌─────────────────────┐
+│   Coordinator       │  Phase 4: Summary & Report
+│  - Synthesize       │  • Comprehensive workflow summary
+│  - Report           │  • Document limitations
+│  - Next steps       │  • Wet lab implementation guide
+└─────────────────────┘
+```
+
+**Key Innovation - AnalystAgent as Data Curator:**
+- Takes raw sequences from DatabaseAgent
+- Performs **complete data curation pipeline**: QC → processing → alignment → phylogenetics
+- Assesses data quality and identifies potential weak points
+- Provides curated, analysis-ready data to PrimerDesignAgent
+- This ensures high-quality input for primer design decisions
+
+### 🛠️ MCP Tools (15 Tools Active, 6 Planned - Phases 1, 2 & 3 Complete)
+
+#### **Database Server** (Phase 1 ✅ - 5 Tools Active, 6 Planned)
+**Used by:** DatabaseAgent (Phase 1: Data Retrieval)
 
 Access to multiple genomic databases and sequence retrieval:
 
+**Currently Active (5 tools):**
+
 1. **get_sequences** - Retrieve DNA/RNA sequences from NCBI, BOLD, SILVA, UNITE
-2. **gget_ref** - Get reference genomes from Ensembl
-3. **gget_search** - Search Ensembl for genes and transcripts
-4. **gget_info** - Fetch detailed gene/transcript information
-5. **gget_seq** - Retrieve nucleotide or amino acid sequences by ID
-6. **get_taxonomy** - Fetch detailed taxonomic information
-7. **get_neighbors** - Find taxonomically related species (potential off-targets)
-8. **extract_sequence_columns** - Parse sequence metadata (accession, organism, location, etc.)
-9. **search_sra_studies** - Search NCBI SRA database for sequencing projects
+2. **get_taxonomy** - Fetch detailed taxonomic information and verify species names
+3. **get_neighbors** - Find taxonomically related species (potential off-targets)
+4. **extract_sequence_columns** - Parse sequence metadata (accession, organism, location, etc.)
+5. **search_sra_studies** - Search NCBI SRA database for sequencing projects
+
+**Planned - Phase 1 Expansion (6 tools):**
+
+6. **gget_ref** - Get reference genomes from Ensembl
+7. **gget_search** - Search Ensembl for genes and transcripts
+8. **gget_info** - Fetch detailed gene/transcript information
+9. **gget_seq** - Retrieve nucleotide or amino acid sequences by ID
 10. **get_sra_runinfo** - Get detailed metadata for SRA runs
 11. **search_sra_cloud** - Query SRA via cloud SQL (BigQuery/Athena)
 
 #### **Processing Server** (Phase 2 ✅ - 5 Tools)
+**Used by:** AnalystAgent (Phase 2: Data Curation - Step 1: QC)
 
 Quality control and sequence processing pipeline:
 
@@ -220,7 +294,78 @@ Quality control and sequence processing pipeline:
    - Single-command workflow
    - Comprehensive statistics tracking
 
-**Coming Soon**: Alignment Server (Phase 3) - MAFFT, MUSCLE, phylogenetics
+#### **Alignment Server** (Phase 3 ✅ - 5 Tools)
+**Used by:** AnalystAgent (Phase 2: Data Curation - Steps 2-3: Alignment & Phylogenetics)
+
+Multiple sequence alignment and phylogenetic analysis:
+
+1. **align_sequences** - Multiple sequence alignment:
+   - Support for MAFFT, MUSCLE, Clustal Omega, gget_muscle
+   - Configurable alignment strategies (linsi, ginsi, einsi for MAFFT)
+   - Automatic algorithm selection
+   - Returns aligned sequences with statistics
+
+2. **process_alignment** - Alignment cleaning and assessment:
+   - CIAlign integration for quality improvement
+   - Gap-rich column removal
+   - Divergent sequence detection
+   - Alignment quality statistics
+
+3. **build_phylogeny** - Phylogenetic tree construction:
+   - Neighbor Joining (NJ) method
+   - Maximum Likelihood (ML) support
+   - Multiple distance models (p-distance, Jukes-Cantor, Kimura)
+   - Bootstrap support
+   - Newick format output
+
+4. **calculate_distances** - Distance matrix calculation:
+   - Pairwise distance calculations
+   - Multiple evolutionary models
+   - p-distance, Jukes-Cantor, Kimura 2-parameter
+   - Matrix format output
+
+5. **align_and_analyze** - Complete alignment pipeline:
+   - Single-command workflow
+   - Alignment + cleaning + phylogeny + distances
+   - Configurable pipeline steps
+   - Comprehensive analysis output
+
+#### **Design Server** (Phase 4 🚧 Planned)
+**Used by:** PrimerDesignAgent (Phase 3: Primer Design & Validation)
+
+Signature region discovery and primer design (coming soon):
+
+1. **find_signature_regions** - Automated candidate region discovery:
+   - Identify conserved regions within target species
+   - Identify variable regions between target and off-targets
+   - Score regions by conservation/divergence metrics
+   - Return ranked candidate regions for primer placement
+
+2. **design_primers** - Primer3 integration:
+   - Automated primer design for candidate regions
+   - Configurable parameters (Tm, GC%, length, amplicon size)
+   - Multiple primer set generation
+   - Degenerate primer support
+
+3. **validate_primers** - Oligo quality assessment:
+   - Thermodynamic analysis
+   - Secondary structure prediction (hairpins, dimers)
+   - GC clamp assessment
+   - Primer efficiency prediction
+
+4. **insilico_pcr** - In-silico PCR simulation:
+   - Test primers against target sequences
+   - Test primers against off-target sequences
+   - Predict amplicon sizes
+   - Identify potential cross-reactivity
+
+5. **blast_primers** - BLAST-based specificity:
+   - BLAST primers against nt database
+   - Identify potential off-target hits
+   - Calculate specificity scores
+   - Generate specificity report
+
+**Status:** Tools designed and specified - awaiting implementation
 
 ### 💬 Interactive Chat Interface
 
@@ -273,7 +418,7 @@ Logs include:
 
 ### Quick Integration Test
 
-Test both database and processing servers:
+Test all three MCP servers (database, processing, and alignment):
 
 ```bash
 # Quick standalone test
@@ -281,7 +426,7 @@ python3 test_processing_integration.py
 
 # Expected output:
 # ✓ Connected to MCP servers
-# ✓ Total functions available: 16 (11 database + 5 processing)
+# ✓ Total functions available: 21 (11 database + 5 processing + 5 alignment)
 # ✓ fasta_qc call successful!
 ```
 
@@ -290,17 +435,19 @@ python3 test_processing_integration.py
 Run all tests including function calling and individual tool tests:
 
 ```bash
-# Complete test suite with 3 test suites:
+# Complete test suite with 4 test suites:
 # 1. Basic Function Calling
 # 2. Processing MCP Integration
-# 3. Individual Processing Tools
+# 3. Alignment MCP Integration
+# 4. Individual Processing Tools
 python3 test_function_calling.py
 
 # Expected output:
 # ✅ PASS  Basic Function Calling
 # ✅ PASS  Processing MCP Integration
+# ✅ PASS  Alignment MCP Integration
 # ✅ PASS  Individual Processing Tools
-# Overall: 3/3 test suites passed
+# Overall: 4/4 test suites passed
 ```
 
 ### Manual Testing
@@ -447,6 +594,7 @@ NCBI_API_KEY=your-ncbi-key                    # Increases NCBI rate limits
 LOG_LEVEL=INFO                                # DEBUG, INFO, WARNING, ERROR
 MCP_DATABASE_SERVER=ndiag-database-server     # Database server container
 MCP_PROCESSING_SERVER=ndiag-processing-server # Processing server container (Phase 2)
+MCP_ALIGNMENT_SERVER=ndiag-alignment-server   # Alignment server container (Phase 3)
 ```
 
 **Getting API Keys:**
@@ -506,7 +654,7 @@ See **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** for complete deployment guide.
 |-------|--------|--------|-------|
 | **Phase 1** | Database | ✅ Complete | get_sequences, get_taxonomy, get_neighbors, extract_sequence_columns, search_sra_studies |
 | **Phase 2** | Processing | ✅ Complete | fasta_qc, dereplicate_sequences, mask_low_complexity, detect_chimeras, process_sequences |
-| **Phase 3** | Alignment | 🚧 Planned | align_sequences, build_phylogeny, calculate_distances |
+| **Phase 3** | Alignment | ✅ Complete | align_sequences, process_alignment, build_phylogeny, calculate_distances, align_and_analyze |
 | **Phase 4** | Design | 🚧 Planned | find_signature_regions, design_primers, validate_primers |
 | **Phase 5** | Validation | 🚧 Planned | blast_primers, insilico_pcr, search_literature |
 | **Phase 6** | Export | 🚧 Planned | export_results, generate_report, track_provenance |

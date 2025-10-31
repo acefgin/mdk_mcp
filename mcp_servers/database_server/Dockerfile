@@ -15,11 +15,15 @@ RUN apt-get update && apt-get install -y \
     wget \
     git \
     build-essential \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
-# Install EDirect tools for NCBI
+# Install EDirect tools for NCBI (as root, will be accessible to all users)
 RUN curl -s https://ftp.ncbi.nlm.nih.gov/entrez/entrezdirect/install-edirect.sh | bash
 ENV PATH="/root/edirect:${PATH}"
+
+# Create non-root user
+RUN useradd -m -u 1000 mcp
 
 # Set working directory
 WORKDIR /app
@@ -33,8 +37,12 @@ COPY database_mcp_server.py .
 COPY config.py .
 COPY mcp-server.json .
 
+# Copy entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 # Create directory for temporary files
-RUN mkdir -p /tmp/mcp_cache
+RUN mkdir -p /tmp/mcp_cache /results/sequences
 
 # Set environment variables
 ENV PYTHONPATH="/app"
@@ -46,9 +54,8 @@ ENV PYTHONUNBUFFERED=1
 # Expose the port
 EXPOSE 8000
 
-# MCP servers use stdio transport, no HTTP health check needed
-# Health check disabled for MCP stdio servers
+# Use entrypoint script to handle permissions and privilege dropping
+ENTRYPOINT ["/entrypoint.sh"]
 
-# Keep container running - MCP server will be started on-demand via docker exec
-# This prevents the restart loop that occurs when stdio servers exit immediately
+# Default: keep container running for docker exec
 CMD ["tail", "-f", "/dev/null"]
