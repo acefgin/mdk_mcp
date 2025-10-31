@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     mafft \
     clustalo \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Install MUSCLE v5
@@ -37,20 +38,23 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 COPY alignment_mcp_server.py /app/
 COPY config.py /app/
 
-# Create temp directory
-RUN mkdir -p /tmp/mcp_alignment
+# Copy entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Create non-root user and directories
+RUN useradd -m -u 1000 mcp
+RUN mkdir -p /tmp/mcp_alignment /results/sequences
 
 # Expose port (if needed for HTTP transport in future)
 EXPOSE 8002
-
-# Run as non-root user for security
-RUN useradd -m -u 1000 mcp && chown -R mcp:mcp /app /tmp/mcp_alignment
-USER mcp
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD mafft --version || exit 1
 
-# Keep container running - MCP server will be started on-demand via docker exec
-# This prevents the restart loop that occurs when stdio servers exit immediately
+# Use entrypoint script to handle permissions and privilege dropping
+ENTRYPOINT ["/entrypoint.sh"]
+
+# Default: keep container running for docker exec
 CMD ["tail", "-f", "/dev/null"]

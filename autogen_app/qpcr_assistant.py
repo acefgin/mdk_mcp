@@ -27,6 +27,7 @@ from text_resources import (
     COORDINATOR_SYSTEM_MESSAGE,
     DATABASE_AGENT_SYSTEM_MESSAGE,
     ANALYST_SYSTEM_MESSAGE,
+    PRIMER_DESIGN_AGENT_SYSTEM_MESSAGE,
     README_TEMPLATE,
     BANNER_LINES,
     COMMANDS_TEXT,
@@ -144,12 +145,15 @@ class TaskLogger:
 
         # Smart truncation for tool results
         processed_result = self._smart_truncate(result, 1000)
+        
+        # NEW: Mask large fasta_content in arguments to avoid bloating logs
+        cleaned_arguments = self._mask_fasta_content(arguments)
 
         self.task_log[0]["tool_calls"].append({
             "timestamp": datetime.now().isoformat(),
             "agent": agent_name,
             "tool": tool_name,
-            "arguments": arguments,
+            "arguments": cleaned_arguments,
             "result_preview": processed_result,
             "result_length": len(result),
             "success": not result.startswith("Error:"),
@@ -327,6 +331,36 @@ class TaskLogger:
         truncated += f"\n\n[Content truncated - Full length: {len(content)} characters]"
         
         return truncated
+    
+    def _mask_fasta_content(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """Mask large fasta_content in arguments to avoid bloating logs."""
+        if not arguments or "fasta_content" not in arguments:
+            return arguments
+        
+        fasta_content = arguments.get("fasta_content", "")
+        
+        # If fasta_content is large (>500 chars), replace with summary
+        if isinstance(fasta_content, str) and len(fasta_content) > 500:
+            # Count sequences
+            seq_count = fasta_content.count('>')
+            
+            # Extract first header only
+            first_header = ""
+            if '>' in fasta_content:
+                first_newline = fasta_content.find('\n')
+                if first_newline > 0:
+                    first_header = fasta_content[:first_newline]
+            
+            # Create masked copy
+            masked_args = arguments.copy()
+            masked_args["fasta_content"] = (
+                f"[MASKED: {seq_count} sequences, {len(fasta_content):,} characters]\n"
+                f"First header: {first_header}\n"
+                f"[Full content available in tool_result file]"
+            )
+            return masked_args
+        
+        return arguments
 
 
 class QPCRAssistant:
@@ -393,16 +427,41 @@ class QPCRAssistant:
            - These are registered separately via agent.register_function()
 
         Both are required for successful function calling.
+        
+        DatabaseAgent has ONLY database tools (pure data retrieval) per 4-agent architecture.
+        Processing tools belong to AnalystAgent.
         """
         # Start with base config
         config = self._build_llm_config().copy()
 
-        # Add function schemas for MCP tools (database + processing)
-        # This tells the LLM which functions are available and how to call them
-        function_schemas = create_autogen_functions(["database", "processing"])
+        # Add function schemas for MCP tools (DATABASE ONLY - pure data retrieval)
+        # Processing and alignment tools belong to AnalystAgent
+        function_schemas = create_autogen_functions(["database"])
         config["functions"] = function_schemas
 
-        logger.info(f"DatabaseAgent llm_config includes {len(function_schemas)} function schemas")
+        logger.info(f"DatabaseAgent llm_config includes {len(function_schemas)} function schemas (database only)")
+        logger.debug(f"Function schemas: {[f['name'] for f in function_schemas]}")
+
+        return config
+
+    def _build_analyst_agent_llm_config(self) -> Dict[str, Any]:
+        """
+        Build LLM configuration specifically for AnalystAgent with processing + alignment function schemas.
+
+        AnalystAgent handles ALL sequence curation and analysis tasks:
+        - Quality control and processing (from processing server)
+        - Alignment and phylogenetic analysis (from alignment server)
+        This makes AnalystAgent responsible for preparing curated, analysis-ready data for primer design.
+        """
+        # Start with base config
+        config = self._build_llm_config().copy()
+
+        # Add function schemas for processing AND alignment MCP tools
+        # AnalystAgent is responsible for the entire data curation pipeline
+        function_schemas = create_autogen_functions(["processing", "alignment"])
+        config["functions"] = function_schemas
+
+        logger.info(f"AnalystAgent llm_config includes {len(function_schemas)} function schemas")
         logger.debug(f"Function schemas: {[f['name'] for f in function_schemas]}")
 
         return config
@@ -436,10 +495,14 @@ class QPCRAssistant:
             "processing": {
                 "container": os.getenv("MCP_PROCESSING_SERVER", "ndiag-processing-server"),
                 "command": ["python3", "/app/processing_mcp_server.py"]
+            },
+            "alignment": {
+                "container": os.getenv("MCP_ALIGNMENT_SERVER", "ndiag-alignment-server"),
+                "command": ["python3", "/app/alignment_mcp_server.py"]
             }
             # Add more servers as phases complete:
-            # "alignment": {...},
             # "design": {...},
+            # "validation": {...},
         }
 
         self.mcp_bridge = MCPClientBridge(server_configs)
@@ -580,6 +643,12 @@ class QPCRAssistant:
             "mask_low_complexity": make_sync_wrapper("mask_low_complexity"),
             "detect_chimeras": make_sync_wrapper("detect_chimeras"),
             "process_sequences": make_sync_wrapper("process_sequences"),
+            # Alignment tools
+            "align_sequences": make_sync_wrapper("align_sequences"),
+            "process_alignment": make_sync_wrapper("process_alignment"),
+            "build_phylogeny": make_sync_wrapper("build_phylogeny"),
+            "calculate_distances": make_sync_wrapper("calculate_distances"),
+            "align_and_analyze": make_sync_wrapper("align_and_analyze"),
         }
     
     def _handle_sequence_result(self, result: str, kwargs: dict) -> str:
@@ -700,134 +769,308 @@ Do NOT request the full sequence content - it's already saved."""
         
         return result
 
-    def _create_agents(self):
-        """Create AutoGen agent team (AG2 0.2.x style)."""
-
-        # Verify MCP bridge is initialized
-        if not self.mcp_executor:
-            raise RuntimeError("MCP executor not initialized. Call _initialize_mcp_bridge() first.")
+    def _create_function_maps(self, mcp_functions: Dict[str, Callable]) -> Dict[str, Dict[str, Callable]]:
+        """
+        Create function maps for each agent based on 4-agent architecture.
         
-        logger.info("MCP executor verified - creating agents with tool access")
-
-        # Display model information
-        model_info = self.config_list[0] if self.config_list else {}
-        model_name = self.model_name or model_info.get("model", "unknown")
-        api_type = model_info.get("api_type", "unknown")
-
-        model_display = MODEL_DISPLAY_NAMES.get(model_name, f"{api_type.upper()} - {model_name}")
-
-        print_colored(f"🤖 Using {model_display}", Colors.BRIGHT_GREEN)
-
-        # Create MCP function wrappers
-        mcp_functions = self._create_mcp_function_wrappers()
-
-        # Create function map for registration
-        function_map = {
-            # Database tools
+        Args:
+            mcp_functions: Dictionary of MCP function wrappers
+            
+        Returns:
+            Dictionary containing function maps for each agent:
+            - database_function_map: 5 database tools
+            - analyst_function_map: 10 tools (5 processing + 5 alignment)
+            - primer_design_function_map: 0 tools (Phase 4 pending)
+        """
+        database_function_map = {
+            # Database tools - pure data retrieval (5 tools)
             "get_sequences": mcp_functions["get_sequences"],
             "get_taxonomy": mcp_functions["get_taxonomy"],
             "get_neighbors": mcp_functions["get_neighbors"],
             "extract_sequence_columns": mcp_functions["extract_sequence_columns"],
             "search_sra_studies": mcp_functions["search_sra_studies"],
-            # Processing tools
+        }
+
+        analyst_function_map = {
+            # Processing tools - sequence curation and QC (5 tools)
             "fasta_qc": mcp_functions["fasta_qc"],
             "dereplicate_sequences": mcp_functions["dereplicate_sequences"],
             "mask_low_complexity": mcp_functions["mask_low_complexity"],
             "detect_chimeras": mcp_functions["detect_chimeras"],
             "process_sequences": mcp_functions["process_sequences"],
+            # Alignment tools - sequence analysis (5 tools)
+            "align_sequences": mcp_functions["align_sequences"],
+            "process_alignment": mcp_functions["process_alignment"],
+            "build_phylogeny": mcp_functions["build_phylogeny"],
+            "calculate_distances": mcp_functions["calculate_distances"],
+            "align_and_analyze": mcp_functions["align_and_analyze"],
+        }
+        
+        primer_design_function_map = {
+            # Phase 4 tools will be added here (5 tools planned):
+            # "find_signature_regions": mcp_functions["find_signature_regions"],
+            # "design_primers": mcp_functions["design_primers"],
+            # "validate_primers": mcp_functions["validate_primers"],
+            # "insilico_pcr": mcp_functions["insilico_pcr"],
+            # "blast_primers": mcp_functions["blast_primers"],
         }
 
-        # 1. Coordinator Agent
-        self.agents["coordinator"] = AssistantAgent(
-            name="Coordinator",
-            system_message=COORDINATOR_SYSTEM_MESSAGE,
-            llm_config=self.llm_config
-        )
+        return {
+            "database": database_function_map,
+            "analyst": analyst_function_map,
+            "primer_design": primer_design_function_map,
+        }
 
-        # 2. Database Agent (with MCP tools)
-        # CRITICAL FIX: Create specialized llm_config with function schemas
-        # This tells the LLM which functions are available so it can generate proper function calls
-        database_llm_config = self._build_database_agent_llm_config()
+    def _validate_agent_function_registration(
+        self, 
+        agent_name: str, 
+        llm_config: Dict[str, Any], 
+        function_map: Dict[str, Callable]
+    ) -> None:
+        """
+        Validate that function schemas in llm_config match registered handlers in function_map.
         
-        self.agents["database"] = AssistantAgent(
-            name="DatabaseAgent",
-            system_message=DATABASE_AGENT_SYSTEM_MESSAGE,
-            llm_config=database_llm_config  # ← Now includes function schemas
-        )
+        Args:
+            agent_name: Name of the agent being validated
+            llm_config: LLM configuration containing function schemas
+            function_map: Dictionary of registered function handlers
+        """
+        if "functions" not in llm_config:
+            logger.debug(f"{agent_name}: No function schemas in llm_config (expected for agents without tools)")
+            return
 
-        # Register functions with DatabaseAgent for execution
-        # This provides the actual execution handlers when LLM generates function calls
-        self.agents["database"].register_function(
-            function_map=function_map
-        )
-        
-        # Verify function registration
-        logger.info(f"DatabaseAgent registered functions: {list(function_map.keys())}")
-        logger.debug(f"DatabaseAgent function_map keys: {list(self.agents['database']._function_map.keys()) if hasattr(self.agents['database'], '_function_map') else 'N/A'}")
-        
-        # Validate that function schemas match execution handlers
-        schema_names = {f["name"] for f in database_llm_config["functions"]}
+        schema_names = {f["name"] for f in llm_config["functions"]}
         handler_names = set(function_map.keys())
+        
         if schema_names == handler_names:
-            logger.info(f"✓ Function schemas and handlers match: {sorted(schema_names)}")
+            logger.info(f"✓ {agent_name}: Function schemas and handlers match ({len(schema_names)} tools)")
+            logger.debug(f"  Tools: {sorted(schema_names)}")
         else:
             missing_handlers = schema_names - handler_names
             extra_handlers = handler_names - schema_names
             if missing_handlers:
-                logger.warning(f"⚠️  Function schemas without handlers: {missing_handlers}")
+                logger.warning(f"⚠️  {agent_name}: Function schemas without handlers: {missing_handlers}")
             if extra_handlers:
-                logger.warning(f"⚠️  Function handlers without schemas: {extra_handlers}")
+                logger.warning(f"⚠️  {agent_name}: Function handlers without schemas: {extra_handlers}")
 
-        # 3. Analysis Agent
-        self.agents["analyst"] = AssistantAgent(
-            name="AnalystAgent",
-            system_message=ANALYST_SYSTEM_MESSAGE,
+    def _create_coordinator_agent(self) -> AssistantAgent:
+        """
+        Create Coordinator agent (no tools - orchestration only).
+        
+        Returns:
+            Configured CoordinatorAgent
+        """
+        coordinator = AssistantAgent(
+            name="Coordinator",
+            system_message=COORDINATOR_SYSTEM_MESSAGE,
             llm_config=self.llm_config
         )
+        logger.info("Created Coordinator agent (orchestration, no tools)")
+        return coordinator
 
-        # 4. User Proxy (for termination and user interaction)
-        self.agents["user_proxy"] = UserProxyAgent(
-            name="User",
-            human_input_mode="NEVER",  # Don't ask for user input during workflow
-            max_consecutive_auto_reply=50,  # Allow more interactions
-            is_termination_msg=self._is_termination_message,
-            code_execution_config=False,
-            function_map=function_map,  # Register functions with user proxy for execution
+    def _create_database_agent(self, function_map: Dict[str, Callable]) -> AssistantAgent:
+        """
+        Create DatabaseAgent with database retrieval tools.
+        
+        Args:
+            function_map: Dictionary of database tool handlers (5 tools)
+            
+        Returns:
+            Configured DatabaseAgent with registered functions
+        """
+        # Build specialized llm_config with function schemas
+        llm_config = self._build_database_agent_llm_config()
+        
+        # Create agent
+        database_agent = AssistantAgent(
+            name="DatabaseAgent",
+            system_message=DATABASE_AGENT_SYSTEM_MESSAGE,
+            llm_config=llm_config
         )
 
-        # Create group chat
-        max_rounds = int(os.getenv("AUTOGEN_MAX_ROUNDS", "20"))  # Use environment variable or default to 20
-        logger.info(f"Setting max_rounds to {max_rounds} (from AUTOGEN_MAX_ROUNDS env var)")
-        self.groupchat = GroupChat(
+        # Register function handlers
+        database_agent.register_function(function_map=function_map)
+        
+        # Validate registration
+        self._validate_agent_function_registration("DatabaseAgent", llm_config, function_map)
+        
+        return database_agent
+
+    def _create_analyst_agent(self, function_map: Dict[str, Callable]) -> AssistantAgent:
+        """
+        Create AnalystAgent with processing and alignment tools.
+        
+        Args:
+            function_map: Dictionary of processing + alignment tool handlers (10 tools)
+            
+        Returns:
+            Configured AnalystAgent with registered functions
+        """
+        # Build specialized llm_config with function schemas
+        llm_config = self._build_analyst_agent_llm_config()
+        
+        # Create agent
+        analyst_agent = AssistantAgent(
+            name="AnalystAgent",
+            system_message=ANALYST_SYSTEM_MESSAGE,
+            llm_config=llm_config
+        )
+
+        # Register function handlers
+        analyst_agent.register_function(function_map=function_map)
+        
+        # Validate registration
+        self._validate_agent_function_registration("AnalystAgent", llm_config, function_map)
+        
+        return analyst_agent
+
+    def _create_primer_design_agent(self, function_map: Dict[str, Callable]) -> AssistantAgent:
+        """
+        Create PrimerDesignAgent (advisory mode - Phase 4 tools pending).
+        
+        Args:
+            function_map: Dictionary of primer design tool handlers (0 tools currently)
+            
+        Returns:
+            Configured PrimerDesignAgent
+        """
+        # No specialized llm_config yet - Phase 4 will add function schemas
+        primer_agent = AssistantAgent(
+            name="PrimerDesignAgent",
+            system_message=PRIMER_DESIGN_AGENT_SYSTEM_MESSAGE,
+            llm_config=self.llm_config
+        )
+        
+        # Register functions if available (empty dict for now)
+        if function_map:
+            primer_agent.register_function(function_map=function_map)
+            logger.info(f"PrimerDesignAgent created with {len(function_map)} tools")
+        else:
+            logger.info("PrimerDesignAgent created in advisory mode (Phase 4 tools pending)")
+        
+        return primer_agent
+
+    def _create_user_proxy_agent(self, all_functions: Dict[str, Callable]) -> UserProxyAgent:
+        """
+        Create UserProxyAgent for termination and tool execution.
+        
+        Args:
+            all_functions: Combined function map from all agents
+            
+        Returns:
+            Configured UserProxyAgent
+        """
+        user_proxy = UserProxyAgent(
+            name="User",
+            human_input_mode="NEVER",
+            max_consecutive_auto_reply=50,
+            is_termination_msg=self._is_termination_message,
+            code_execution_config=False,
+            function_map=all_functions,
+        )
+        logger.info(f"Created UserProxyAgent with access to {len(all_functions)} tools")
+        return user_proxy
+
+    def _create_group_chat_and_manager(self) -> tuple:
+        """
+        Create GroupChat and GroupChatManager for multi-agent coordination.
+        
+        Returns:
+            Tuple of (GroupChat, GroupChatManager)
+        """
+        max_rounds = int(os.getenv("AUTOGEN_MAX_ROUNDS", "50"))
+        
+        groupchat = GroupChat(
             agents=[
                 self.agents["coordinator"],
                 self.agents["database"],
                 self.agents["analyst"],
+                self.agents["primer_design"],
                 self.agents["user_proxy"]
             ],
             messages=[],
-            max_round=max_rounds,  # Use environment variable for max rounds
-            speaker_selection_method="auto",  # Let LLM decide next speaker
-            allow_repeat_speaker=False,  # Prevent infinite loops
+            max_round=max_rounds,
+            speaker_selection_method="auto",
+            allow_repeat_speaker=False,
         )
 
-        # Create group chat manager
-        self.manager = GroupChatManager(
-            groupchat=self.groupchat,
+        manager = GroupChatManager(
+            groupchat=groupchat,
             llm_config=self.llm_config
         )
-
-        logger.info(f"Created {len(self.agents)} agents")
         
-        # Test function availability (optional - only log, don't fail)
-        try:
-            test_func = function_map.get("get_taxonomy")
-            if test_func and callable(test_func):
-                logger.info("✓ Function registration test: get_taxonomy is callable")
-            else:
-                logger.warning("⚠ Function registration test: get_taxonomy is NOT callable")
-        except Exception as e:
-            logger.warning(f"Function registration test failed (non-critical): {e}")
+        logger.info(f"Created GroupChat with {len(groupchat.agents)} agents (max {max_rounds} rounds)")
+        
+        return groupchat, manager
+
+    def _display_agent_summary(self, function_maps: Dict[str, Dict[str, Callable]]) -> None:
+        """
+        Display summary of created agents and their tool allocations.
+        
+        Args:
+            function_maps: Dictionary of function maps for each agent
+        """
+        total_tools = sum(len(fm) for fm in function_maps.values())
+        
+        logger.info(f"✓ Created 4 specialized agents with {total_tools} total MCP tools:")
+        logger.info(f"  • Coordinator: 0 tools (orchestration)")
+        logger.info(f"  • DatabaseAgent: {len(function_maps['database'])} tools (data retrieval)")
+        logger.info(f"  • AnalystAgent: {len(function_maps['analyst'])} tools (processing + alignment)")
+        logger.info(f"  • PrimerDesignAgent: {len(function_maps['primer_design'])} tools (Phase 4 pending)")
+
+    def _create_agents(self):
+        """
+        Create AutoGen agent team following 4-agent architecture.
+        
+        Architecture:
+        - Coordinator: Workflow planning and orchestration (0 tools)
+        - DatabaseAgent: Data retrieval from public databases (5 tools)
+        - AnalystAgent: Data curation and analysis (10 tools: 5 processing + 5 alignment)
+        - PrimerDesignAgent: Primer design and validation (0 tools - Phase 4 pending)
+        - UserProxyAgent: Termination and tool execution coordination
+        
+        Raises:
+            RuntimeError: If MCP executor not initialized
+        """
+        # Verify MCP bridge is initialized
+        if not self.mcp_executor:
+            raise RuntimeError("MCP executor not initialized. Call _setup_mcp_bridge() first.")
+        
+        logger.info("Initializing 4-agent qPCR design system...")
+
+        # Display model information
+        model_info = self.config_list[0] if self.config_list else {}
+        model_name = self.model_name or model_info.get("model", "unknown")
+        api_type = model_info.get("api_type", "unknown")
+        model_display = MODEL_DISPLAY_NAMES.get(model_name, f"{api_type.upper()} - {model_name}")
+        print_colored(f"🤖 Using {model_display}", Colors.BRIGHT_GREEN)
+
+        # Step 1: Create MCP function wrappers
+        mcp_functions = self._create_mcp_function_wrappers()
+        logger.debug(f"Created {len(mcp_functions)} MCP function wrappers")
+
+        # Step 2: Create function maps for each agent
+        function_maps = self._create_function_maps(mcp_functions)
+
+        # Step 3: Create specialized agents
+        self.agents["coordinator"] = self._create_coordinator_agent()
+        self.agents["database"] = self._create_database_agent(function_maps["database"])
+        self.agents["analyst"] = self._create_analyst_agent(function_maps["analyst"])
+        self.agents["primer_design"] = self._create_primer_design_agent(function_maps["primer_design"])
+        
+        # Step 4: Create user proxy with all functions
+        all_functions = {
+            **function_maps["database"],
+            **function_maps["analyst"],
+            **function_maps["primer_design"]
+        }
+        self.agents["user_proxy"] = self._create_user_proxy_agent(all_functions)
+
+        # Step 5: Create group chat and manager
+        self.groupchat, self.manager = self._create_group_chat_and_manager()
+
+        # Step 6: Display summary
+        self._display_agent_summary(function_maps)
 
     def health_check(self) -> Dict[str, Any]:
         """
@@ -900,27 +1143,57 @@ Do NOT request the full sequence content - it's already saved."""
         content = message.get("content", "").rstrip()
         sender = message.get("name", "unknown")
         
-        # 0. WORKFLOW ENFORCEMENT: Check if processing was done before allowing termination
-        # This prevents premature termination when sequences are retrieved but not processed
+        # CRITICAL: Check if message contains a function call (work is continuing)
+        # AutoGen/AG2 stores function calls in 'function_call' or 'tool_calls' field
+        if message.get("function_call") or message.get("tool_calls"):
+            logger.info(f"Message from {sender} contains function call - allowing execution")
+            return False
+        
+        # 0. WORKFLOW ENFORCEMENT: Ensure complete 4-phase workflow before termination
+        # Prevents premature termination at any phase
         if hasattr(self, 'task_logger') and self.task_logger and self.task_logger.task_log:
             tool_calls = self.task_logger.task_log[0].get("tool_calls", [])
-            # Check for SUCCESSFUL retrieval and processing (not just attempts)
+            
+            # Check for SUCCESSFUL completion of each phase
             has_successful_retrieval = any(
                 "get_sequences" == tc.get("tool") and tc.get("success", False) 
                 for tc in tool_calls
             )
             has_processing = any(
                 tc.get("tool") in ["fasta_qc", "process_sequences", "dereplicate_sequences", 
-                                   "mask_low_complexity", "detect_chimeras"] 
+                                   "mask_low_complexity", "detect_chimeras"] and tc.get("success", False)
+                for tc in tool_calls
+            )
+            has_alignment = any(
+                tc.get("tool") in ["align_sequences", "align_and_analyze"] and tc.get("success", False)
+                for tc in tool_calls
+            )
+            has_phylogeny = any(
+                tc.get("tool") in ["build_phylogeny", "calculate_distances", "align_and_analyze"] and tc.get("success", False)
                 for tc in tool_calls
             )
             
-            # If sequences were SUCCESSFULLY retrieved but not processed, don't allow termination yet
+            # PHASE 1: If sequences retrieved but not processed, don't terminate
             if has_successful_retrieval and not has_processing and content.endswith("TERMINATE"):
-                logger.warning(f"Preventing premature termination from {sender} - sequences retrieved but not processed yet")
-                logger.warning(f"Tool calls so far: retrieval={has_successful_retrieval}, processing={has_processing}")
-                # Don't terminate - let the workflow continue
+                logger.warning(f"[WORKFLOW] Preventing termination - Phase 1 complete but Phase 2 (processing) not started")
+                logger.warning(f"  retrieval={has_successful_retrieval}, processing={has_processing}")
                 return False
+            
+            # PHASE 2: If processing done but no alignment, don't terminate
+            if has_processing and not has_alignment and content.endswith("TERMINATE"):
+                logger.warning(f"[WORKFLOW] Preventing termination - Phase 2 (processing) complete but Phase 2b (alignment) not started")
+                logger.warning(f"  processing={has_processing}, alignment={has_alignment}")
+                return False
+            
+            # PHASE 3: If alignment done but no phylogeny, don't terminate  
+            if has_alignment and not has_phylogeny and content.endswith("TERMINATE"):
+                logger.warning(f"[WORKFLOW] Preventing termination - Alignment complete but phylogenetic analysis not done")
+                logger.warning(f"  alignment={has_alignment}, phylogeny={has_phylogeny}")
+                return False
+            
+            # Log workflow progress
+            if has_successful_retrieval or has_processing or has_alignment or has_phylogeny:
+                logger.info(f"[WORKFLOW] Phase completion: Retrieval={has_successful_retrieval}, Processing={has_processing}, Alignment={has_alignment}, Phylogeny={has_phylogeny}")
         
         # 1. Explicit termination condition (highest priority)
         if content.endswith("TERMINATE"):
@@ -928,7 +1201,25 @@ Do NOT request the full sequence content - it's already saved."""
             self._log_termination_reason("EXPLICIT_TERMINATE", content, sender)
             return True
             
-        # 2. Check for repetitive messages (loop detection)
+        # 2. LOOP DETECTION: Check if same tool called too many times
+        if hasattr(self, 'task_logger') and self.task_logger and self.task_logger.task_log:
+            tool_calls = self.task_logger.task_log[0].get("tool_calls", [])
+            # Count occurrences of each tool
+            tool_counts = {}
+            for tc in tool_calls:
+                tool_name = tc.get("tool", "")
+                tool_counts[tool_name] = tool_counts.get(tool_name, 0) + 1
+            
+            # If any tool was called >10 times, it's a loop - force termination
+            for tool_name, count in tool_counts.items():
+                if count > 10:
+                    logger.error(f"[LOOP DETECTED] Tool '{tool_name}' called {count} times - likely infinite loop!")
+                    logger.error(f"  This usually means the agent is stuck and not progressing to the next phase")
+                    logger.error(f"  Forcing termination to prevent further waste")
+                    self._log_termination_reason("INFINITE_LOOP_DETECTED", f"Tool {tool_name} called {count} times", sender)
+                    return True
+        
+        # 3. Check for repetitive messages (content-based loop detection)
         if hasattr(self, 'groupchat') and self.groupchat and len(self.groupchat.messages) > 5:
             recent_messages = self.groupchat.messages[-8:]  # Last 8 messages
             if len(recent_messages) >= 6:
@@ -941,21 +1232,42 @@ Do NOT request the full sequence content - it's already saved."""
                     return True
                     
         # 3. Check for task completion indicators
+        # CRITICAL: Only terminate on EXPLICIT completion indicators
+        # DO NOT terminate on phase completions (e.g., "sequences retrieved", "data collection complete")
+        # DO NOT terminate if agent is announcing next actions or suggesting function calls
         completion_phrases = [
+            "all phases complete",
+            "all 4 phases complete", 
+            "complete 4-phase workflow finished",
             "workflow completed",
-            "task completed", 
-            "design completed",
-            "analysis completed",
-            "project completed",
-            "experimental validation phase",
-            "ready to advance",
-            "data collection complete",
-            "sequences retrieved",
-            "primer design complete",
-            "assay design complete"
+            "primer design complete and validated",
+            "assay design complete and validated",
+            "ready for wet lab implementation"
         ]
         
         content_lower = content.lower()
+        
+        # Check if agent is suggesting a function call (work is continuing)
+        if "suggested function call" in content_lower or "function call:" in content_lower:
+            logger.info(f"Agent {sender} suggesting function call - workflow continuing")
+            return False
+        
+        # Check if agent is announcing next steps (work is continuing)
+        continuation_indicators = [
+            "i will initiate",
+            "i will proceed",
+            "let's start",
+            "let's initiate",
+            "next steps:",
+            "proceeding to",
+            "will now perform"
+        ]
+        for indicator in continuation_indicators:
+            if indicator in content_lower:
+                logger.info(f"Agent {sender} announcing continuation: '{indicator}' - allowing workflow to proceed")
+                return False
+        
+        # Only check completion phrases if no continuation indicators found
         for phrase in completion_phrases:
             if phrase in content_lower:
                 logger.info(f"Task completion phrase detected from {sender}: '{phrase}'")
@@ -982,7 +1294,7 @@ Do NOT request the full sequence content - it's already saved."""
         # 5. Check conversation length (safety net)
         if hasattr(self, 'groupchat') and self.groupchat:
             current_rounds = len(self.groupchat.messages)
-            max_rounds = int(os.getenv("AUTOGEN_MAX_ROUNDS", "20"))
+            max_rounds = int(os.getenv("AUTOGEN_MAX_ROUNDS", "50"))
             if current_rounds >= max_rounds - 2:  # Stop 2 rounds before max
                 logger.warning(f"Approaching maximum rounds ({current_rounds}/{max_rounds}) - terminating conversation")
                 self._log_termination_reason("MAX_ROUNDS_APPROACHING", content, sender)
@@ -1050,20 +1362,16 @@ Do NOT request the full sequence content - it's already saved."""
                     'timestamp': datetime.now().isoformat()
                 }
             
-            # 2. Task completion phrases
+            # 2. Task completion phrases (strict - avoid false positives)
             content_lower = content.lower()
             completion_phrases = [
+                "all phases complete",
+                "all 4 phases complete",
+                "complete 4-phase workflow finished",
                 "workflow completed",
-                "task completed",
-                "design completed",
-                "analysis completed",
-                "project completed",
-                "experimental validation phase",
-                "ready to advance",
-                "data collection complete",
-                "sequences retrieved",
-                "primer design complete",
-                "assay design complete"
+                "primer design complete and validated",
+                "assay design complete and validated",
+                "ready for wet lab implementation"
             ]
             
             for phrase in completion_phrases:
@@ -1075,7 +1383,7 @@ Do NOT request the full sequence content - it's already saved."""
                     }
         
         # 3. Check if max rounds was reached
-        max_rounds = int(os.getenv("AUTOGEN_MAX_ROUNDS", "20"))
+        max_rounds = int(os.getenv("AUTOGEN_MAX_ROUNDS", "50"))
         if len(messages) >= max_rounds:
             return {
                 'reason': 'MAX_ROUNDS_REACHED',

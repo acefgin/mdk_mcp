@@ -2,6 +2,10 @@ version: '3.8'
 
 # Docker Compose configuration for AutoGen + MCP Multi-Agent System
 # This orchestrates MCP servers and AutoGen agents for qPCR assay design
+#
+# Permission handling: Containers use entrypoint scripts to automatically
+# fix permissions on shared volumes and drop privileges to non-root users.
+# No manual UID/GID configuration needed!
 
 services:
   # ========================================
@@ -23,6 +27,7 @@ services:
       - TEMP_DIR=/tmp/mcp_cache
     volumes:
       - database_cache:/tmp/mcp_cache
+      - ./results:/results  # Shared results directory (entrypoint fixes permissions)
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "ps", "aux", "|", "grep", "database_mcp_server"]
@@ -41,9 +46,10 @@ services:
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - TEMP_DIR=/tmp/mcp_cache
+      - RESULTS_DIR=/results
     volumes:
       - processing_cache:/tmp/mcp_cache
-      - ./results:/results  # Access to sequence files from database server
+      - ./results:/results  # Shared results (entrypoint fixes permissions)
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "ps", "aux", "|", "grep", "processing_mcp_server"]
@@ -51,14 +57,27 @@ services:
       timeout: 10s
       retries: 3
 
-  # Phase 3: Alignment MCP Server (when implemented)
-  # alignment-server:
-  #   build: ./mcp_servers/alignment_server
-  #   container_name: ndiag-alignment-server
-  #   stdin_open: true
-  #   networks:
-  #     - ndiag-network
-  #   restart: unless-stopped
+  # Phase 3: Alignment MCP Server
+  alignment-server:
+    build: ./mcp_servers/alignment_server
+    container_name: ndiag-alignment-server
+    stdin_open: true
+    tty: false
+    networks:
+      - ndiag-network
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - TEMP_DIR=/tmp/mcp_cache
+      - RESULTS_DIR=/results
+    volumes:
+      - alignment_cache:/tmp/mcp_cache
+      - ./results:/results  # Shared results (entrypoint fixes permissions)
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ps", "aux", "|", "grep", "alignment_mcp_server"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # Phase 4: Design MCP Server (when implemented)
   # design-server:
@@ -79,6 +98,7 @@ services:
     depends_on:
       - database-server
       - processing-server
+      - alignment-server
     networks:
       - ndiag-network
     env_file:
@@ -86,9 +106,12 @@ services:
     environment:
       - MCP_DATABASE_SERVER=ndiag-database-server
       - MCP_PROCESSING_SERVER=ndiag-processing-server
+      - MCP_ALIGNMENT_SERVER=ndiag-alignment-server
+      - AUTOGEN_MAX_ROUNDS=50
+      - RESULTS_DIR=/results
     volumes:
       - ./autogen_app:/app
-      - ./results:/results  # Persist primer designs and reports
+      - ./results:/results  # Shared results (readable by all)
       - /var/run/docker.sock:/var/run/docker.sock  # Access to Docker for MCP communication
     ports:
       - "8501:8501"  # Streamlit UI (if enabled)
@@ -120,6 +143,8 @@ volumes:
   database_cache:
     driver: local
   processing_cache:
+    driver: local
+  alignment_cache:
     driver: local
   results:
     driver: local

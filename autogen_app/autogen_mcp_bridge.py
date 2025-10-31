@@ -23,8 +23,9 @@ def summarize_large_result(result: Any, max_chars: int = 1000) -> str:
     """
     Summarize large tool results to avoid token limit issues.
     
-    CRITICAL: For sequence data, return ONLY metadata (count, headers).
+    CRITICAL: For sequence data, return ONLY metadata (count, headers, OUTPUT FILE PATH).
     NEVER return actual sequence content - it will break token budgets.
+    ALWAYS include output_file path if present - agents need this to continue workflow!
 
     Args:
         result: Tool result (could be string, dict, list, etc.)
@@ -49,14 +50,32 @@ def summarize_large_result(result: Any, max_chars: int = 1000) -> str:
         # Handle sequence data (most common large result)
         if isinstance(data, dict):
             summary_parts = []
+            
+            # CRITICAL: Always extract and display output_file if present
+            output_file = data.get("output_file")
+            stats = data.get("stats", {})
 
             # Count sequences if FASTA format - ONLY return metadata
             if "sequences" in data or any(key.startswith('>') for key in str(data)[:1000]):
                 # Count sequences in FASTA
                 fasta_count = str(data).count('>')
                 if fasta_count > 0:
-                    summary_parts.append(f"Retrieved {fasta_count} sequences")
-                    # Show ONLY headers (first 2), NO sequence content
+                    summary_parts.append(f"✓ Processed {fasta_count} sequences successfully")
+                    
+                    # CRITICAL: Show output file path prominently
+                    if output_file:
+                        summary_parts.append(f"\n📁 OUTPUT FILE: {output_file}")
+                        summary_parts.append("   ⚠️  USE THIS PATH for next steps (alignment, phylogeny, etc.)")
+                    
+                    # Show statistics if available
+                    if stats:
+                        if "input_sequences" in stats and "output_sequences" in stats:
+                            summary_parts.append(f"\n📊 QC Statistics:")
+                            summary_parts.append(f"   • Input: {stats['input_sequences']} sequences")
+                            summary_parts.append(f"   • Output: {stats['output_sequences']} sequences")
+                            summary_parts.append(f"   • Removed: {stats['input_sequences'] - stats['output_sequences']} sequences")
+                    
+                    # Show ONLY first 2 headers, NO sequence content
                     lines = str(data).split('\n')
                     headers = []
                     for line in lines[:30]:  # Only scan first 30 lines
@@ -65,10 +84,15 @@ def summarize_large_result(result: Any, max_chars: int = 1000) -> str:
                             if len(headers) >= 2:
                                 break
                     if headers:
-                        summary_parts.append("\n\nSample headers:")
+                        summary_parts.append("\nSample headers:")
                         summary_parts.append('\n'.join(headers))
+                    
                     summary_parts.append(f"\n... and {fasta_count - 2} more sequences")
-                    summary_parts.append("\n[Sequence data saved to file - do not request full content]")
+                    summary_parts.append("\n[Full sequence data available in output file]")
+                    
+                    if output_file:
+                        summary_parts.append(f"\n🔧 NEXT STEP: Use fasta_file=\"{output_file}\" for alignment")
+                    
                     return '\n'.join(summary_parts)
 
             # Handle metadata extractions
@@ -153,12 +177,20 @@ class MCPClientBridge:
         logger.info("All MCP servers connected successfully")
 
     async def _start_server(self, server_name: str, config: Dict[str, str]) -> None:
-        """Start a single MCP server connection."""
+        """
+        Connect to a running MCP server.
+        
+        The MCP servers are already running in their containers (started by CMD in Dockerfile).
+        We connect to them by running a new instance via docker exec with interactive stdin.
+        """
         container = config["container"]
         command = config["command"]
-
-        # Connect via docker exec for stdio communication
+        
+        # Start a new instance of the MCP server to communicate with
+        # This is necessary because docker attach doesn't work well with asyncio pipes
         full_command = ["docker", "exec", "-i", container] + command
+        
+        logger.debug(f"Connecting to {server_name} via: {' '.join(full_command)}")
 
         process = await asyncio.create_subprocess_exec(
             *full_command,
@@ -168,6 +200,8 @@ class MCPClientBridge:
         )
 
         self.processes[server_name] = process
+        
+        logger.debug(f"Process created for {server_name}, initializing MCP protocol...")
 
         # Initialize MCP protocol
         await self._initialize_mcp_connection(server_name)
@@ -304,15 +338,46 @@ class MCPClientBridge:
     async def _send_request(self, server: str, request: Dict[str, Any]) -> Dict[str, Any]:
         """Send a JSON-RPC request to a server and get response."""
         process = self.processes[server]
+        
+        # Check if process is still alive
+        if process.returncode is not None:
+            logger.error(f"Process for {server} has exited with code {process.returncode}")
+            raise Exception(f"Connection lost - {server} process exited")
 
         # Send request
         request_json = json.dumps(request) + "\n"
-        process.stdin.write(request_json.encode())
-        await process.stdin.drain()
+        logger.debug(f"Sending request to {server}: {request_json[:200]}")
+        
+        try:
+            process.stdin.write(request_json.encode())
+            await process.stdin.drain()
+        except Exception as e:
+            logger.error(f"Failed to write to {server} stdin: {e}")
+            raise Exception(f"Connection lost - failed to write to {server}")
 
         # Read response (handle large responses by reading until newline)
         response_data = b""
+        response_line = None  # Initialize to prevent UnboundLocalError
         timeout_seconds = 60.0  # 60 second timeout for large responses
+
+        # Start task to read stderr in parallel
+        async def read_stderr():
+            try:
+                stderr_data = await asyncio.wait_for(process.stderr.read(4096), timeout=1.0)
+                if stderr_data:
+                    stderr_text = stderr_data.decode('utf-8', errors='ignore')
+                    # Only log as warning if it contains actual errors
+                    # MCP servers log INFO messages to stderr by default
+                    if any(level in stderr_text for level in ['ERROR', 'CRITICAL', 'WARNING', 'Exception', 'Traceback']):
+                        logger.warning(f"stderr from {server}: {stderr_text}")
+                    else:
+                        logger.debug(f"stderr from {server}: {stderr_text}")
+            except asyncio.TimeoutError:
+                pass  # No stderr data, that's fine
+            except Exception as e:
+                logger.debug(f"Error reading stderr from {server}: {e}")
+
+        stderr_task = asyncio.create_task(read_stderr())
 
         try:
             while True:
@@ -322,6 +387,16 @@ class MCPClientBridge:
                 )
 
                 if not chunk:
+                    # No more data available - check if we got any response
+                    if response_data:
+                        # Use whatever we have (might not end with newline)
+                        response_line = response_data.rstrip(b'\n')
+                    else:
+                        # Check if process exited
+                        if process.returncode is not None:
+                            logger.error(f"Process {server} exited during read with code {process.returncode}")
+                            await stderr_task  # Wait for stderr
+                            raise Exception(f"Connection lost - {server} process exited unexpectedly")
                     break
 
                 response_data += chunk
@@ -334,12 +409,30 @@ class MCPClientBridge:
                     break
 
         except asyncio.TimeoutError:
-            raise Exception(f"Timeout reading response from {server}")
+            # If we got partial data before timeout, try to use it
+            if response_data:
+                logger.warning(f"Timeout reading from {server}, attempting to parse partial response")
+                response_line = response_data.rstrip(b'\n')
+            else:
+                await stderr_task  # Check for errors in stderr
+                raise Exception(f"Timeout reading response from {server}")
+        finally:
+            # Clean up stderr task
+            if not stderr_task.done():
+                stderr_task.cancel()
 
         if not response_line:
-            raise Exception(f"No response from {server}")
+            logger.error(f"No response from {server}. Process alive: {process.returncode is None}")
+            raise Exception(f"No response received from {server}")
 
-        response = json.loads(response_line.decode())
+        logger.debug(f"Received response from {server}: {response_line[:200]}")
+
+        try:
+            response = json.loads(response_line.decode())
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to decode JSON response from {server}: {response_line[:200]}")
+            raise Exception(f"Invalid JSON response from {server}: {e}")
+
         return response
 
     def _gen_request_id(self) -> int:

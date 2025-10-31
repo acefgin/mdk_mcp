@@ -2,14 +2,28 @@
 """
 Test script to verify function calling is working correctly.
 
-This script performs a simple test of the DatabaseAgent's ability to 
-actually call MCP functions (not just write "CALL" as text).
+This script tests the 4-agent qPCR design system's ability to 
+actually call MCP functions across 3 servers (21 tools total).
+
+ARCHITECTURE UNDER TEST:
+1. DatabaseAgent (5 tools, 6 more planned) → Database Server (Phase 1)
+   - Active: get_sequences, get_taxonomy, get_neighbors, extract_sequence_columns, search_sra_studies
+   - Planned: gget_ref, gget_search, gget_info, gget_seq, get_sra_runinfo, search_sra_cloud
+   
+2. AnalystAgent (10 tools) → Processing + Alignment Servers (Phase 2 + 3)
+   - Processing tools (5): fasta_qc, dereplicate_sequences, mask_low_complexity, detect_chimeras, process_sequences
+   - Alignment tools (5): align_sequences, process_alignment, build_phylogeny, calculate_distances, align_and_analyze
+   
+3. PrimerDesignAgent (0 tools - advisory mode)
+   - Awaiting Phase 4 Design Server tools (5 planned)
+
+Total: 15 tools active, 11 tools planned (26 total when complete)
 
 Expected behavior:
-- Model should be gpt-4o
-- Function calls should appear in logs
-- Real results should be returned
-- Tool call count > 0
+- Model should be gpt-4o (or configured LLM)
+- Function calls should appear in logs with correct agent attribution
+- Real results should be returned from MCP servers
+- Tool call count > 0 for database, processing, and alignment tests
 """
 
 import json
@@ -45,10 +59,10 @@ logger = logging.getLogger(__name__)
 
 
 def test_function_calling():
-    """Test that function calling actually works."""
+    """Test that DatabaseAgent can call database tools (Phase 1 - 5 tools active)."""
     
     print("=" * 80)
-    print("FUNCTION CALLING TEST")
+    print("TEST 1: DATABASE AGENT - Function Calling (5 tools)")
     print("=" * 80)
     print()
     
@@ -197,10 +211,10 @@ def test_function_calling():
 
 
 def test_processing_tools():
-    """Test that processing MCP server tools work correctly."""
-
+    """Test that AnalystAgent can call processing tools (Phase 2 - 5 tools)."""
+    
     print("=" * 80)
-    print("PROCESSING MCP SERVER TEST")
+    print("TEST 2: ANALYST AGENT - Processing Tools (5 tools)")
     print("=" * 80)
     print()
 
@@ -260,8 +274,9 @@ def test_processing_tools():
     print("-" * 80)
 
     test_query = """
-    Please retrieve 10 COI sequences for Salmo salar from NCBI,
-    then perform quality control using the fasta_qc tool with:
+    DatabaseAgent: Please retrieve 10 COI sequences for Salmo salar from NCBI.
+    
+    AnalystAgent: Once retrieved, please perform quality control using the fasta_qc tool with:
     - min_length: 400
     - max_n_percent: 5.0
     - remove_duplicates: true
@@ -343,6 +358,155 @@ def test_processing_tools():
     print(f"  ✓ {len(proc_tools_used)} processing tool call(s) executed")
     print()
 
+    return True
+
+
+def test_alignment_tools():
+    """Test that AnalystAgent can call alignment tools (Phase 3 - 5 tools)."""
+    
+    print("=" * 80)
+    print("TEST 3: ANALYST AGENT - Alignment & Phylogenetics Tools (5 tools)")
+    print("=" * 80)
+    print()
+    
+    # 1. Load configuration
+    config_path = Path(__file__).parent / "autogen_app" / "OAI_CONFIG_LIST.json"
+    
+    if not config_path.exists():
+        print(f"❌ Config file not found: {config_path}")
+        return False
+    
+    with open(config_path) as f:
+        config_list = json.load(f)
+    
+    # Resolve env variables
+    for config in config_list:
+        if "api_key" in config and isinstance(config["api_key"], str):
+            if config["api_key"].startswith("env:"):
+                env_var_name = config["api_key"][4:]
+                env_value = os.getenv(env_var_name)
+                if env_value:
+                    config["api_key"] = env_value
+    
+    print(f"✓ Loaded config from {config_path}")
+    print()
+    
+    # 2. Create assistant
+    print("Creating QPCRAssistant with alignment tools...")
+    test_results_dir = "/tmp/test_alignment"
+    os.makedirs(test_results_dir, exist_ok=True)
+    
+    try:
+        assistant = QPCRAssistant(
+            config_list=config_list,
+            log_dir=test_results_dir,
+            model_name="gpt-4o"
+        )
+        print(f"✓ Created assistant")
+        print()
+    except Exception as e:
+        print(f"❌ Failed to create assistant: {e}")
+        return False
+    
+    # 3. Initialize MCP connections (should include alignment server)
+    print("Initializing MCP connections (database + processing + alignment)...")
+    try:
+        assistant.initialize()
+        print("✓ MCP servers connected")
+        print()
+    except Exception as e:
+        print(f"❌ Failed to initialize: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+    
+    # 4. Test alignment workflow
+    print("Running alignment workflow test...")
+    print("-" * 80)
+    
+    test_query = """
+    DatabaseAgent: Please retrieve 5 COI sequences for Salmo salar from NCBI.
+    
+    AnalystAgent: Once sequences are retrieved, please align them using 
+    the align_sequences tool with MAFFT algorithm.
+    
+    Report the alignment statistics.
+    """
+    
+    try:
+        result = assistant.run_workflow(test_query)
+        print()
+        print("-" * 80)
+        print("✓ Alignment workflow completed")
+        print()
+    except Exception as e:
+        print(f"❌ Workflow failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+    
+    # 5. Verify alignment tools were called
+    print("Verifying alignment tools were used...")
+    
+    log_files = sorted(Path(test_results_dir).glob("task_*.json"))
+    if not log_files:
+        print("❌ No log files found")
+        return False
+    
+    latest_log = log_files[-1]
+    with open(latest_log) as f:
+        log_data = json.load(f)
+    
+    tool_calls = log_data.get("tool_calls", [])
+    
+    # Check for both database and alignment tool calls
+    db_tools_used = []
+    alignment_tools_used = []
+    
+    for tc in tool_calls:
+        tool_name = tc.get("tool", "")
+        if tool_name in ["get_sequences", "get_taxonomy"]:
+            db_tools_used.append(tool_name)
+        elif tool_name in ["align_sequences", "process_alignment", "build_phylogeny", "calculate_distances", "align_and_analyze"]:
+            alignment_tools_used.append(tool_name)
+    
+    print(f"  Database tools used: {len(db_tools_used)} - {', '.join(set(db_tools_used))}")
+    print(f"  Alignment tools used: {len(alignment_tools_used)} - {', '.join(set(alignment_tools_used))}")
+    print()
+    
+    if len(alignment_tools_used) == 0:
+        print("❌ FAILED: No alignment tools were called!")
+        print("   Expected at least align_sequences to be called")
+        return False
+    
+    print("✓ Alignment tools were successfully called!")
+    print()
+    
+    # Show detailed results
+    print("Alignment tool calls:")
+    for tc in tool_calls:
+        tool_name = tc.get("tool", "")
+        if tool_name in ["align_sequences", "process_alignment", "build_phylogeny", "calculate_distances", "align_and_analyze"]:
+            print(f"  • {tool_name}")
+            args = tc.get("arguments", {})
+            print(f"    Arguments: {list(args.keys())}")
+            success = tc.get("success", False)
+            status = "✓ Success" if success else "✗ Failed"
+            print(f"    Status: {status}")
+            print()
+    
+    # 6. Final verdict
+    print("=" * 80)
+    print("✅ ALIGNMENT MCP SERVER TEST PASSED!")
+    print("=" * 80)
+    print()
+    print("Integration verified:")
+    print("  ✓ Alignment server connected")
+    print("  ✓ Alignment tools available to agents")
+    print("  ✓ End-to-end workflow (retrieve + align) working")
+    print(f"  ✓ {len(alignment_tools_used)} alignment tool call(s) executed")
+    print()
+    
     return True
 
 
@@ -491,14 +655,20 @@ Parameters: dust_threshold=2.0""",
 if __name__ == "__main__":
     print("\n")
     print("╔" + "=" * 78 + "╗")
-    print("║" + " " * 20 + "MCP FUNCTION CALLING TEST SUITE" + " " * 26 + "║")
+    print("║" + " " * 15 + "4-AGENT QPCR DESIGN SYSTEM - TEST SUITE" + " " * 23 + "║")
     print("╚" + "=" * 78 + "╝")
-    print("\n")
+    print("\nArchitecture Under Test:")
+    print("  • DatabaseAgent (5 tools active, 6 planned) → Database Server (Phase 1)")
+    print("  • AnalystAgent (10 tools) → Processing + Alignment Servers (Phase 2+3)")
+    print("  • PrimerDesignAgent (0 tools - advisory mode, Phase 4 coming)")
+    print("  • Coordinator (orchestration)")
+    print("\nTotal: 15 MCP tools active across 3 servers (21 planned)\n")
 
     tests = [
-        ("Basic Function Calling", test_function_calling),
-        ("Processing MCP Integration", test_processing_tools),
-        ("Individual Processing Tools", test_all_processing_tools),
+        ("Test 1: DatabaseAgent Function Calling (5 tools)", test_function_calling),
+        ("Test 2: AnalystAgent Processing Tools (5 tools)", test_processing_tools),
+        ("Test 3: AnalystAgent Alignment Tools (5 tools)", test_alignment_tools),
+        ("Test 4: AnalystAgent Individual Tools", test_all_processing_tools),
     ]
 
     results = {}

@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     python3 \
     python3-pip \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Install seqkit
@@ -43,20 +44,23 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 COPY processing_mcp_server.py /app/
 COPY config.py /app/
 
-# Create temp directory
-RUN mkdir -p /tmp/mcp_processing
+# Copy entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Create non-root user and directories
+RUN useradd -m -u 1000 mcp
+RUN mkdir -p /tmp/mcp_processing /results/sequences
 
 # Expose port (if needed for HTTP transport in future)
 EXPOSE 8001
-
-# Run as non-root user for security
-RUN useradd -m -u 1000 mcp && chown -R mcp:mcp /app /tmp/mcp_processing
-USER mcp
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD seqkit version || exit 1
 
-# Keep container running - MCP server will be started on-demand via docker exec
-# This prevents the restart loop that occurs when stdio servers exit immediately
+# Use entrypoint script to handle permissions and privilege dropping
+ENTRYPOINT ["/entrypoint.sh"]
+
+# Default: keep container running for docker exec
 CMD ["tail", "-f", "/dev/null"]

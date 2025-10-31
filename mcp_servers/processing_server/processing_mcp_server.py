@@ -19,6 +19,7 @@ import subprocess
 from typing import Any, Dict, List, Optional, Union
 import traceback
 from pathlib import Path
+from datetime import datetime
 
 from Bio import SeqIO
 from mcp.server.models import InitializationOptions
@@ -664,8 +665,35 @@ async def process_sequences_impl(
 
         logger.info(f"Pipeline complete: {all_stats['input_sequences']} -> {all_stats['output_sequences']} sequences")
 
+        # NEW: Save processed sequences to file
+        output_file = None
+        if all_stats["output_sequences"] > 0:
+            try:
+                # Generate output filename based on pipeline steps
+                pipeline_suffix = "_" + "_".join(pipeline) if pipeline else "_processed"
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                output_filename = f"processed_sequences{pipeline_suffix}_{timestamp}.fasta"
+                
+                # Use /results/sequences directory (shared across MCP servers)
+                results_dir = os.getenv("RESULTS_DIR", "/results")
+                output_file = os.path.join(results_dir, "sequences", output_filename)
+                
+                # Ensure directory exists
+                os.makedirs(os.path.dirname(output_file), exist_ok=True)
+                
+                # Save processed sequences
+                with open(output_file, 'w') as f:
+                    f.write(current_fasta)
+                
+                logger.info(f"Saved processed sequences to: {output_file}")
+            except Exception as e:
+                logger.error(f"Failed to save processed sequences: {e}")
+                # Don't fail the whole operation if file saving fails
+                output_file = None
+
         return {
             "processed_fasta": current_fasta,
+            "output_file": output_file,
             "stats": all_stats,
             "success": True
         }
