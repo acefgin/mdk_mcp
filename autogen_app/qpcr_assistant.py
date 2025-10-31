@@ -10,6 +10,8 @@ import sys
 import asyncio
 import logging
 import json
+import uuid
+import hashlib
 import readline  # Import readline for proper line editing support
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Callable
@@ -381,6 +383,8 @@ class QPCRAssistant:
         # Default to gpt-4o if no model specified (needed for function calling)
         self.model_name = model_name or "gpt-4o"
         self.log_dir = log_dir
+        self.run_id = None  # Will be generated when workflow starts
+        self.run_dir = None  # Directory for current run: /results/{run_id}/
         self.mcp_bridge = None
         self.mcp_executor = None
         self.agents = {}
@@ -388,9 +392,168 @@ class QPCRAssistant:
         self.manager = None
         self.task_logger = TaskLogger(log_dir)
         self.event_loop = None  # For running async MCP calls
+        self.manifest = {}  # Manifest tracking for current run
 
         # Create llm_config for agents
         self.llm_config = self._build_llm_config()
+
+    def _generate_run_id(self) -> str:
+        """
+        Generate unique run ID for this workflow.
+
+        Returns:
+            UUID string for this run
+        """
+        run_id = str(uuid.uuid4())
+        logger.info(f"Generated run_id: {run_id}")
+        return run_id
+
+    def _create_run_directory(self):
+        """
+        Create directory structure for this run:
+        /results/{run_id}/
+        /results/{run_id}/phase1/  (Database retrieval)
+        /results/{run_id}/phase2/  (Processing & QC)
+        /results/{run_id}/phase3/  (Alignment & Phylogeny)
+        /results/{run_id}/phase4/  (Primer Design)
+        """
+        self.run_dir = os.path.join(self.log_dir, self.run_id)
+
+        # Create phase directories
+        phase_dirs = [
+            os.path.join(self.run_dir, "phase1"),  # Database retrieval
+            os.path.join(self.run_dir, "phase2"),  # Processing & QC
+            os.path.join(self.run_dir, "phase3"),  # Alignment & Phylogeny
+            os.path.join(self.run_dir, "phase4"),  # Primer Design (future)
+        ]
+
+        for phase_dir in phase_dirs:
+            os.makedirs(phase_dir, exist_ok=True)
+
+        logger.info(f"Created run directory structure at {self.run_dir}")
+
+        # Initialize manifest
+        self.manifest = {
+            "run_id": self.run_id,
+            "created_at": datetime.now().isoformat(),
+            "status": "in_progress",
+            "phases": {
+                "phase1": {"status": "pending", "artifacts": []},
+                "phase2": {"status": "pending", "artifacts": []},
+                "phase3": {"status": "pending", "artifacts": []},
+                "phase4": {"status": "pending", "artifacts": []},
+            },
+            "tool_versions": {
+                "gget": "unknown",
+                "seqkit": "unknown",
+                "vsearch": "unknown",
+                "mafft": "unknown",
+                "muscle": "unknown",
+                "clustalo": "unknown",
+            }
+        }
+
+        # Save initial manifest
+        self._save_manifest()
+
+    def _save_manifest(self):
+        """Save manifest.json to run directory."""
+        if not self.run_dir:
+            return
+
+        manifest_path = os.path.join(self.run_dir, "manifest.json")
+        with open(manifest_path, 'w') as f:
+            json.dump(self.manifest, f, indent=2)
+
+        logger.debug(f"Saved manifest to {manifest_path}")
+
+    def _check_cached_artifact(self, phase: str, artifact_type: str, metadata_match: Dict[str, Any] = None) -> Optional[str]:
+        """
+        Check if a cached artifact exists in the manifest.
+
+        Args:
+            phase: Phase name (e.g., "phase1", "phase2")
+            artifact_type: Type of artifact to look for
+            metadata_match: Optional metadata to match against (e.g., taxon, region)
+
+        Returns:
+            Path to cached artifact if found and valid, None otherwise
+        """
+        if not self.manifest or phase not in self.manifest.get("phases", {}):
+            return None
+
+        phase_artifacts = self.manifest["phases"][phase].get("artifacts", [])
+
+        for artifact in phase_artifacts:
+            # Check if type matches
+            if artifact.get("type") != artifact_type:
+                continue
+
+            # Check if file still exists
+            artifact_path = artifact.get("path")
+            if not artifact_path or not os.path.exists(artifact_path):
+                continue
+
+            # If metadata matching requested, check if metadata matches
+            if metadata_match:
+                artifact_metadata = artifact.get("metadata", {})
+                match = all(
+                    artifact_metadata.get(key) == value
+                    for key, value in metadata_match.items()
+                )
+                if not match:
+                    continue
+
+            # Verify file integrity if hash exists
+            stored_hash = artifact.get("sha256")
+            if stored_hash:
+                with open(artifact_path, 'rb') as f:
+                    current_hash = hashlib.sha256(f.read()).hexdigest()
+                if current_hash != stored_hash:
+                    logger.warning(f"Cached artifact at {artifact_path} has mismatched hash - ignoring")
+                    continue
+
+            logger.info(f"[IDEMPOTENCY] Found valid cached artifact: {artifact_path}")
+            return artifact_path
+
+        return None
+
+    def _update_manifest_artifact(self, phase: str, artifact_path: str, artifact_type: str, metadata: Dict[str, Any] = None):
+        """
+        Add artifact to manifest.
+
+        Args:
+            phase: Phase name (e.g., "phase1", "phase2")
+            artifact_path: Full path to artifact file
+            artifact_type: Type of artifact (e.g., "sequences", "alignment", "tree")
+            metadata: Additional metadata for the artifact
+        """
+        if phase not in self.manifest["phases"]:
+            logger.warning(f"Unknown phase '{phase}' - cannot update manifest")
+            return
+
+        # Calculate file hash for integrity checking
+        file_hash = None
+        if os.path.exists(artifact_path):
+            with open(artifact_path, 'rb') as f:
+                file_hash = hashlib.sha256(f.read()).hexdigest()
+
+        artifact = {
+            "path": artifact_path,
+            "type": artifact_type,
+            "created_at": datetime.now().isoformat(),
+            "size_bytes": os.path.getsize(artifact_path) if os.path.exists(artifact_path) else 0,
+            "sha256": file_hash,
+            "metadata": metadata or {}
+        }
+
+        self.manifest["phases"][phase]["artifacts"].append(artifact)
+        self.manifest["phases"][phase]["status"] = "completed"
+
+        # Save updated manifest
+        self._save_manifest()
+
+        logger.info(f"Added artifact to manifest: {phase}/{artifact_type}")
 
     def _build_llm_config(self) -> Dict[str, Any]:
         """Build LLM configuration for AG2 agents."""
@@ -514,13 +677,40 @@ class QPCRAssistant:
         logger.info("MCP servers connected")
 
     def _save_sequences_to_file(self, sequences: str, taxon: str, region: str, category: str) -> str:
-        """Save sequences to organized folder structure."""
+        """
+        Save sequences to organized folder structure using run_id.
+
+        Args:
+            sequences: FASTA sequences to save
+            taxon: Taxonomic name
+            region: Gene region (e.g., "COI", "16S")
+            category: Category for organizing (e.g., "sequences", "targets", "off_targets")
+
+        Returns:
+            Full path to saved file
+        """
         import os
         import re
         from datetime import datetime
 
-        # Create folder structure
-        category_folder = os.path.join(self.log_dir, category)
+        # Map category to phase
+        phase_mapping = {
+            "sequences": "phase1",
+            "targets": "phase1",
+            "off_targets": "phase1",
+            "processed": "phase2",
+            "aligned": "phase3",
+            "tree": "phase3",
+        }
+        phase = phase_mapping.get(category, "phase1")
+
+        # Use run_id directory if available, otherwise fall back to legacy structure
+        if self.run_dir:
+            category_folder = os.path.join(self.run_dir, phase)
+        else:
+            # Legacy path for backward compatibility
+            category_folder = os.path.join(self.log_dir, category)
+
         os.makedirs(category_folder, exist_ok=True)
 
         # Sanitize taxon name for filename
@@ -535,6 +725,20 @@ class QPCRAssistant:
 
         # Count sequences
         seq_count = sequences.count(">")
+
+        # Update manifest if run_id is active
+        if self.run_dir:
+            self._update_manifest_artifact(
+                phase=phase,
+                artifact_path=filepath,
+                artifact_type="sequences",
+                metadata={
+                    "taxon": taxon,
+                    "region": region,
+                    "category": category,
+                    "sequence_count": seq_count
+                }
+            )
 
         # Update or create README
         self._update_readme(category_folder, safe_taxon, region, filename, seq_count)
@@ -643,7 +847,7 @@ class QPCRAssistant:
             "mask_low_complexity": make_sync_wrapper("mask_low_complexity"),
             "detect_chimeras": make_sync_wrapper("detect_chimeras"),
             "process_sequences": make_sync_wrapper("process_sequences"),
-            # Alignment tools
+            # Alignment tools (Phase 3)
             "align_sequences": make_sync_wrapper("align_sequences"),
             "process_alignment": make_sync_wrapper("process_alignment"),
             "build_phylogeny": make_sync_wrapper("build_phylogeny"),
@@ -738,35 +942,57 @@ Do NOT request the full sequence content - it's already saved."""
     
     def _handle_metadata_result(self, result: str, kwargs: dict) -> str:
         """
-        Handle extract_sequence_columns result: Limit to first 10 records.
+        Handle extract_sequence_columns result: Filter PII and limit to first 10 records.
         """
         if not result or result.startswith("Error"):
             return result
-        
-        # If result is very long, truncate to first 10 records
+
+        # If result is very long, truncate to first 10 records and filter PII
         try:
             import json
             data = json.loads(result) if isinstance(result, str) else result
-            
-            if isinstance(data, list) and len(data) > 10:
-                truncated_data = data[:10]
-                summary = json.dumps(truncated_data, indent=2)
-                summary += f"\n\n... and {len(data) - 10} more records (total: {len(data)} records)"
-                return summary
+
+            # Filter PII from metadata records
+            if isinstance(data, list):
+                # Filter each record
+                filtered_data = [self._filter_pii_from_metadata(record) if isinstance(record, dict) else record
+                                 for record in data]
+
+                if len(filtered_data) > 10:
+                    truncated_data = filtered_data[:10]
+                    summary = json.dumps(truncated_data, indent=2)
+                    summary += f"\n\n... and {len(data) - 10} more records (total: {len(data)} records)"
+                    return summary
+                else:
+                    return json.dumps(filtered_data, indent=2)
+
             elif isinstance(data, dict) and "records" in data:
                 records = data["records"]
-                if len(records) > 10:
-                    data["records"] = records[:10]
+                # Filter each record
+                filtered_records = [self._filter_pii_from_metadata(record) if isinstance(record, dict) else record
+                                    for record in records]
+
+                if len(filtered_records) > 10:
+                    data["records"] = filtered_records[:10]
                     summary = json.dumps(data, indent=2)
                     summary += f"\n\n... and {len(records) - 10} more records (total: {len(records)} records)"
                     return summary
+                else:
+                    data["records"] = filtered_records
+                    return json.dumps(data, indent=2)
+
+            elif isinstance(data, dict):
+                # Single record - filter it
+                filtered_data = self._filter_pii_from_metadata(data)
+                return json.dumps(filtered_data, indent=2)
+
         except:
             pass
-        
+
         # If not too long or can't parse, return as-is (but limit to 3000 chars)
         if len(result) > 3000:
             return result[:3000] + f"\n\n... [Truncated: {len(result) - 3000} more characters]"
-        
+
         return result
 
     def _create_function_maps(self, mcp_functions: Dict[str, Callable]) -> Dict[str, Dict[str, Callable]]:
@@ -1133,16 +1359,19 @@ Do NOT request the full sequence content - it's already saved."""
     def _is_termination_message(self, message: Dict[str, Any]) -> bool:
         """
         Enhanced termination condition to prevent infinite loops and handle task completion.
-        
+
         Args:
             message: The message to check for termination
-            
+
         Returns:
             True if the conversation should terminate
         """
         content = message.get("content", "").rstrip()
         sender = message.get("name", "unknown")
-        
+
+        # Parse intent footer from message
+        intent_info = self._parse_intent_footer(content, sender)
+
         # CRITICAL: Check if message contains a function call (work is continuing)
         # AutoGen/AG2 stores function calls in 'function_call' or 'tool_calls' field
         if message.get("function_call") or message.get("tool_calls"):
@@ -1196,8 +1425,13 @@ Do NOT request the full sequence content - it's already saved."""
                 logger.info(f"[WORKFLOW] Phase completion: Retrieval={has_successful_retrieval}, Processing={has_processing}, Alignment={has_alignment}, Phylogeny={has_phylogeny}")
         
         # 1. Explicit termination condition (highest priority)
+        # CRITICAL: Only Coordinator can issue TERMINATE command
         if content.endswith("TERMINATE"):
-            logger.info(f"Explicit termination message detected from {sender}: 'TERMINATE'")
+            if sender != "Coordinator":
+                logger.warning(f"[SECURITY] Non-Coordinator agent '{sender}' attempted to TERMINATE - REJECTING")
+                logger.warning(f"  Only Coordinator can issue TERMINATE to prevent premature workflow termination")
+                return False
+            logger.info(f"Explicit termination message detected from Coordinator: 'TERMINATE'")
             self._log_termination_reason("EXPLICIT_TERMINATE", content, sender)
             return True
             
@@ -1302,6 +1536,109 @@ Do NOT request the full sequence content - it's already saved."""
                 
         return False
     
+    def _filter_pii_from_metadata(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Filter PII (Personally Identifiable Information) from metadata.
+
+        Removes fields that may contain:
+        - Submitter names
+        - Email addresses
+        - Institution names
+        - Contact information
+
+        Args:
+            metadata: Raw metadata dictionary
+
+        Returns:
+            Filtered metadata with PII removed
+        """
+        # PII fields to remove (case-insensitive)
+        pii_fields = {
+            "submitter", "submitted_by", "author", "authors",
+            "email", "contact", "contact_email", "contact_person",
+            "institution", "organization", "lab", "laboratory",
+            "address", "phone", "fax",
+            "principal_investigator", "pi", "researcher"
+        }
+
+        # Create filtered copy
+        filtered = {}
+        for key, value in metadata.items():
+            key_lower = key.lower()
+
+            # Skip if key matches PII field
+            if key_lower in pii_fields:
+                logger.debug(f"[PII] Filtered field: {key}")
+                continue
+
+            # Skip if key contains PII-related words
+            if any(pii_word in key_lower for pii_word in ["submitter", "author", "email", "contact", "institution"]):
+                logger.debug(f"[PII] Filtered field: {key}")
+                continue
+
+            filtered[key] = value
+
+        if len(filtered) < len(metadata):
+            logger.info(f"[PII] Filtered {len(metadata) - len(filtered)} PII fields from metadata")
+
+        return filtered
+
+    def _parse_intent_footer(self, content: str, sender: str) -> Dict[str, Optional[str]]:
+        """
+        Parse intent footer from agent message.
+
+        Expected format:
+        # intent: <handoff|continue|terminate|error>
+        # next_agent: <Coordinator|DatabaseAgent|AnalystAgent|PrimerDesignAgent|none>
+
+        Args:
+            content: Message content
+            sender: Agent name sending the message
+
+        Returns:
+            Dict with 'intent' and 'next_agent' keys (None if not found)
+        """
+        import re
+
+        intent = None
+        next_agent = None
+
+        # Extract intent
+        intent_match = re.search(r'#\s*intent:\s*(\w+)', content, re.IGNORECASE)
+        if intent_match:
+            intent = intent_match.group(1).lower()
+
+        # Extract next_agent
+        next_agent_match = re.search(r'#\s*next_agent:\s*(\w+)', content, re.IGNORECASE)
+        if next_agent_match:
+            next_agent = next_agent_match.group(1)
+
+        # Validate intent
+        valid_intents = ["handoff", "continue", "terminate", "error"]
+        if intent and intent not in valid_intents:
+            logger.warning(f"[INTENT] Invalid intent '{intent}' from {sender} - expected one of {valid_intents}")
+            intent = None
+
+        # Validate next_agent
+        valid_agents = ["Coordinator", "DatabaseAgent", "AnalystAgent", "PrimerDesignAgent", "none"]
+        if next_agent and next_agent not in valid_agents:
+            logger.warning(f"[INTENT] Invalid next_agent '{next_agent}' from {sender} - expected one of {valid_agents}")
+            next_agent = None
+
+        # Log intent if found
+        if intent or next_agent:
+            logger.info(f"[INTENT] {sender} → intent={intent}, next_agent={next_agent}")
+
+        # Validate intent-sender combination
+        if intent == "terminate" and sender != "Coordinator":
+            logger.warning(f"[INTENT] Non-Coordinator {sender} declared intent:terminate - this is invalid")
+            logger.warning(f"  Only Coordinator can declare terminate intent")
+
+        return {
+            "intent": intent,
+            "next_agent": next_agent
+        }
+
     def _log_termination_reason(self, reason: str, content: str, sender: str):
         """Log the reason for termination with context."""
         termination_info = {
@@ -1608,7 +1945,17 @@ Do NOT request the full sequence content - it's already saved."""
             for step in summary["next_steps"]:
                 print(f"  • {step}")
             print()
-        
+
+        # Compliance disclaimer (automatically injected)
+        print_colored("⚠️  COMPLIANCE NOTICE", Colors.BRIGHT_YELLOW, bold=True)
+        print_colored("Research Use Only - Not for Clinical Diagnostics", Colors.YELLOW)
+        print()
+        print("This tool is designed for research and educational purposes.")
+        print("Results are NOT validated for clinical diagnostic use.")
+        print("For clinical applications, consult regulatory guidelines and")
+        print("conduct proper validation studies before implementation.")
+        print()
+
         print_colored("═══════════════════════════════════════════════════════════════════════════", Colors.CYAN)
         print()
 
@@ -1623,6 +1970,14 @@ Do NOT request the full sequence content - it's already saved."""
             List of messages from the conversation
         """
         logger.info("Starting qPCR design workflow...")
+
+        # Generate run_id and create directory structure
+        self.run_id = self._generate_run_id()
+        self._create_run_directory()
+
+        print_colored(f"🆔 Run ID: {self.run_id}", Colors.CYAN)
+        print_colored(f"📁 Results directory: {self.run_dir}", Colors.CYAN)
+        print()
 
         # Start logging session
         self.task_logger.start_session(user_message)

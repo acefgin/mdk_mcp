@@ -7,6 +7,7 @@ Connects AG2 agents to MCP servers for bioinformatics tool access.
 import asyncio
 import json
 import logging
+import time
 from typing import Dict, Any, List, Optional
 import subprocess
 import uuid
@@ -272,22 +273,24 @@ class MCPClientBridge:
         self,
         server: str,
         tool_name: str,
-        arguments: Dict[str, Any]
+        arguments: Dict[str, Any],
+        max_retries: int = 3
     ) -> Any:
         """
-        Call an MCP tool.
+        Call an MCP tool with exponential backoff retry logic.
 
         Args:
             server: Server name (e.g., "database")
             tool_name: Tool to call (e.g., "get_sequences")
             arguments: Tool arguments
+            max_retries: Maximum number of retry attempts (default: 3)
 
         Returns:
             Tool result
 
         Raises:
             ValueError: If server not found or not initialized
-            Exception: If MCP call fails
+            Exception: If MCP call fails after all retries
         """
         if not self.initialized:
             raise ValueError("MCP bridge not initialized. Call start_servers() first.")
@@ -307,26 +310,68 @@ class MCPClientBridge:
             }
         }
 
-        try:
-            response = await self._send_request(server, request)
+        last_exception = None
+        for attempt in range(max_retries):
+            try:
+                response = await self._send_request(server, request)
 
-            if "error" in response:
-                error_msg = response["error"]
-                logger.error(f"MCP error from {server}.{tool_name}: {error_msg}")
-                raise Exception(f"MCP Error: {error_msg}")
+                if "error" in response:
+                    error_msg = response["error"]
+                    error_str = str(error_msg)
 
-            result = response.get("result", [])
+                    # Check if error is retryable (rate limit, timeout, connection)
+                    is_retryable = any(keyword in error_str.lower() for keyword in [
+                        "rate limit", "timeout", "connection", "temporary",
+                        "503", "429", "502", "504"
+                    ])
 
-            # Extract text content from MCP result
-            if isinstance(result, list) and len(result) > 0:
-                if isinstance(result[0], dict) and "text" in result[0]:
-                    return result[0]["text"]
+                    if is_retryable and attempt < max_retries - 1:
+                        # Exponential backoff: 1s, 4s, 9s
+                        wait_time = (attempt + 1) ** 2
+                        logger.warning(f"[RETRY] {server}.{tool_name} failed with retryable error: {error_msg}")
+                        logger.warning(f"  Retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
+                        await asyncio.sleep(wait_time)
+                        continue
 
-            return result
+                    logger.error(f"MCP error from {server}.{tool_name}: {error_msg}")
+                    raise Exception(f"MCP Error: {error_msg}")
 
-        except Exception as e:
-            logger.error(f"Failed to call {server}.{tool_name}: {e}")
-            raise
+                result = response.get("result", [])
+
+                # Extract text content from MCP result
+                if isinstance(result, list) and len(result) > 0:
+                    if isinstance(result[0], dict) and "text" in result[0]:
+                        return result[0]["text"]
+
+                if attempt > 0:
+                    logger.info(f"[RETRY] {server}.{tool_name} succeeded on attempt {attempt + 1}")
+
+                return result
+
+            except Exception as e:
+                last_exception = e
+                error_str = str(e)
+
+                # Check if error is retryable
+                is_retryable = any(keyword in error_str.lower() for keyword in [
+                    "rate limit", "timeout", "connection", "temporary",
+                    "503", "429", "502", "504"
+                ])
+
+                if is_retryable and attempt < max_retries - 1:
+                    wait_time = (attempt + 1) ** 2
+                    logger.warning(f"[RETRY] {server}.{tool_name} failed: {e}")
+                    logger.warning(f"  Retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(wait_time)
+                    continue
+
+                # Non-retryable error or max retries reached
+                logger.error(f"Failed to call {server}.{tool_name}: {e}")
+                raise
+
+        # If we get here, all retries failed
+        logger.error(f"[RETRY] {server}.{tool_name} failed after {max_retries} attempts")
+        raise last_exception or Exception(f"Failed after {max_retries} retries")
 
     async def list_tools(self, server: str) -> List[Dict[str, Any]]:
         """
@@ -823,9 +868,186 @@ def create_autogen_functions(available_servers: List[str]) -> List[Dict[str, Any
             }
         ])
 
-    # Future servers (when Phase 3+ implemented)
-    # Alignment server functions would go here
+    # Alignment Server Functions (Phase 3)
+    if "alignment" in available_servers:
+        functions.extend([
+            {
+                "name": "align_sequences",
+                "description": "Align sequences using various algorithms (MAFFT, MUSCLE, Clustal Omega, gget_muscle). "
+                              "Use this after processing to create a multiple sequence alignment for phylogenetic analysis. "
+                              "Provide either fasta_content (string) OR fasta_file (file path from /results/sequences/).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "fasta_content": {
+                            "type": "string",
+                            "description": "Input sequences in FASTA format (use this OR fasta_file, not both)"
+                        },
+                        "fasta_file": {
+                            "type": "string",
+                            "description": "Path to FASTA file (e.g., /results/sequences/Salmo_salar_COI_processed_20251023.fasta)"
+                        },
+                        "algorithm": {
+                            "type": "string",
+                            "enum": ["mafft", "muscle", "clustalo", "gget_muscle"],
+                            "default": "mafft",
+                            "description": "Alignment algorithm to use. MAFFT is fast and accurate for most cases."
+                        },
+                        "mafft_strategy": {
+                            "type": "string",
+                            "enum": ["auto", "linsi", "ginsi", "einsi"],
+                            "default": "auto",
+                            "description": "MAFFT alignment strategy (only for MAFFT): auto=automatic, linsi=accurate, ginsi=global, einsi=structural"
+                        },
+                        "max_iterations": {
+                            "type": "integer",
+                            "default": 1000,
+                            "description": "Maximum number of iterations for iterative refinement"
+                        },
+                        "super5": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Use MUSCLE5 super5 algorithm (only for gget_muscle)"
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "process_alignment",
+                "description": "Process and clean alignment using CIAlign, including gap removal and quality assessment. "
+                              "Use this after initial alignment to improve quality before phylogenetic analysis.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "alignment_content": {
+                            "type": "string",
+                            "description": "Aligned sequences in FASTA format (output from align_sequences)"
+                        },
+                        "trim_gaps": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Remove gap-rich columns from alignment"
+                        },
+                        "gap_threshold": {
+                            "type": "number",
+                            "default": 0.5,
+                            "description": "Threshold for gap removal (0-1). Columns with >50% gaps will be removed."
+                        },
+                        "remove_divergent": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Remove divergent sequences that don't align well"
+                        },
+                        "assess_quality": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Calculate alignment quality statistics"
+                        }
+                    },
+                    "required": ["alignment_content"]
+                }
+            },
+            {
+                "name": "build_phylogeny",
+                "description": "Build phylogenetic tree from alignment using NJ, ML, or MP methods. "
+                              "Use this to understand evolutionary relationships and identify signature regions.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "alignment_content": {
+                            "type": "string",
+                            "description": "Aligned sequences in FASTA format"
+                        },
+                        "method": {
+                            "type": "string",
+                            "enum": ["nj", "ml", "mp"],
+                            "default": "nj",
+                            "description": "Tree building method: nj=Neighbor Joining (fast), ml=Maximum Likelihood (accurate), mp=Maximum Parsimony"
+                        },
+                        "bootstrap": {
+                            "type": "integer",
+                            "default": 100,
+                            "description": "Number of bootstrap replicates for branch support"
+                        },
+                        "model": {
+                            "type": "string",
+                            "enum": ["p-distance", "jukes-cantor", "kimura"],
+                            "default": "kimura",
+                            "description": "Distance model for NJ method: kimura is standard for DNA sequences"
+                        }
+                    },
+                    "required": ["alignment_content"]
+                }
+            },
+            {
+                "name": "calculate_distances",
+                "description": "Calculate pairwise distance matrix from alignment. "
+                              "Use this to quantify sequence divergence and identify signature regions.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "alignment_content": {
+                            "type": "string",
+                            "description": "Aligned sequences in FASTA format"
+                        },
+                        "model": {
+                            "type": "string",
+                            "enum": ["p-distance", "jukes-cantor", "kimura"],
+                            "default": "kimura",
+                            "description": "Distance calculation model: kimura accounts for multiple substitutions"
+                        }
+                    },
+                    "required": ["alignment_content"]
+                }
+            },
+            {
+                "name": "align_and_analyze",
+                "description": "Complete pipeline: align sequences, process alignment, and optionally build phylogeny. "
+                              "WHEN TO USE: Prefer this for batch processing after sequence QC is complete. "
+                              "This combines alignment + cleaning + optional phylogenetic analysis in one call. "
+                              "Provide either fasta_content (string) OR fasta_file (file path from /results/sequences/).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "fasta_content": {
+                            "type": "string",
+                            "description": "Input sequences in FASTA format (use this OR fasta_file, not both)"
+                        },
+                        "fasta_file": {
+                            "type": "string",
+                            "description": "Path to FASTA file (e.g., /results/sequences/Salmo_salar_COI_processed_20251023.fasta)"
+                        },
+                        "algorithm": {
+                            "type": "string",
+                            "enum": ["mafft", "muscle", "clustalo", "gget_muscle"],
+                            "default": "mafft",
+                            "description": "Alignment algorithm"
+                        },
+                        "include_phylogeny": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Build phylogenetic tree after alignment"
+                        },
+                        "include_distances": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Calculate distance matrix after alignment"
+                        },
+                        "clean_alignment": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Clean alignment with CIAlign before phylogenetic analysis"
+                        }
+                    },
+                    "required": []
+                }
+            }
+        ])
+
+    # Future servers (when Phase 4+ implemented)
     # Design server functions would go here
+    # Validation server functions would go here
 
     return functions
 
@@ -875,6 +1097,12 @@ class AutoGenMCPFunctionExecutor:
             "mask_low_complexity": ("processing", "mask_low_complexity"),
             "detect_chimeras": ("processing", "detect_chimeras"),
             "process_sequences": ("processing", "process_sequences"),
+            # Alignment tools
+            "align_sequences": ("alignment", "align_sequences"),
+            "process_alignment": ("alignment", "process_alignment"),
+            "build_phylogeny": ("alignment", "build_phylogeny"),
+            "calculate_distances": ("alignment", "calculate_distances"),
+            "align_and_analyze": ("alignment", "align_and_analyze"),
         }
 
         if function_name not in function_map:
@@ -947,6 +1175,12 @@ class AutoGenMCPFunctionExecutor:
             "mask_low_complexity": ("processing", "mask_low_complexity"),
             "detect_chimeras": ("processing", "detect_chimeras"),
             "process_sequences": ("processing", "process_sequences"),
+            # Alignment tools
+            "align_sequences": ("alignment", "align_sequences"),
+            "process_alignment": ("alignment", "process_alignment"),
+            "build_phylogeny": ("alignment", "build_phylogeny"),
+            "calculate_distances": ("alignment", "calculate_distances"),
+            "align_and_analyze": ("alignment", "align_and_analyze"),
         }
 
         if function_name not in function_map:
