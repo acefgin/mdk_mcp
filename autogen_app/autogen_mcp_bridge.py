@@ -50,30 +50,45 @@ def summarize_large_result(result: Any, max_chars: int = 1000) -> str:
         # Handle sequence data (most common large result)
         if isinstance(data, dict):
             summary_parts = []
-            
+
             # CRITICAL: Always extract and display output_file if present
             output_file = data.get("output_file")
             stats = data.get("stats", {})
+            success = data.get("success", False)
 
-            # Count sequences if FASTA format - ONLY return metadata
-            if "sequences" in data or any(key.startswith('>') for key in str(data)[:1000]):
+            # Count sequences if FASTA format - check for any *_fasta field or FASTA content
+            # Processing tools return: processed_fasta, cleaned_fasta, dereplicated_fasta, masked_fasta, non_chimeric_fasta
+            # Alignment tools return: alignment, sequences
+            has_fasta_data = (
+                any(key.endswith('_fasta') for key in data.keys()) or
+                "sequences" in data or
+                "alignment" in data or
+                any(key.startswith('>') for key in str(data)[:1000])
+            )
+
+            if has_fasta_data:
                 # Count sequences in FASTA
                 fasta_count = str(data).count('>')
                 if fasta_count > 0:
-                    summary_parts.append(f"✓ Processed {fasta_count} sequences successfully")
-                    
-                    # CRITICAL: Show output file path prominently
+                    # CRITICAL: Start with clear SUCCESS indicator if present
+                    if success:
+                        summary_parts.append("✅ PROCESSING COMPLETE - SUCCESS")
+                    else:
+                        summary_parts.append(f"✓ Processed {fasta_count} sequences")
+
+                    # CRITICAL: Show output file path prominently FIRST (this is what agents need)
                     if output_file:
                         summary_parts.append(f"\n📁 OUTPUT FILE: {output_file}")
-                        summary_parts.append("   ⚠️  USE THIS PATH for next steps (alignment, phylogeny, etc.)")
-                    
+                        summary_parts.append("   ⚠️  USE THIS PATH for next steps")
+
                     # Show statistics if available
                     if stats:
                         if "input_sequences" in stats and "output_sequences" in stats:
-                            summary_parts.append(f"\n📊 QC Statistics:")
+                            summary_parts.append(f"\n📊 Processing Statistics:")
                             summary_parts.append(f"   • Input: {stats['input_sequences']} sequences")
                             summary_parts.append(f"   • Output: {stats['output_sequences']} sequences")
                             summary_parts.append(f"   • Removed: {stats['input_sequences'] - stats['output_sequences']} sequences")
+                            summary_parts.append(f"   • Retention: {stats.get('retention_percent', 'N/A')}%")
                     
                     # Show ONLY first 2 headers, NO sequence content
                     lines = str(data).split('\n')
@@ -89,10 +104,18 @@ def summarize_large_result(result: Any, max_chars: int = 1000) -> str:
                     
                     summary_parts.append(f"\n... and {fasta_count - 2} more sequences")
                     summary_parts.append("\n[Full sequence data available in output file]")
-                    
-                    if output_file:
+
+                    # CRITICAL: Add very clear next step instructions
+                    if output_file and success:
+                        summary_parts.append(f"\n{'='*60}")
+                        summary_parts.append("🔧 NEXT ACTION REQUIRED:")
+                        summary_parts.append(f"   Processing is COMPLETE. DO NOT call process_sequences again.")
+                        summary_parts.append(f"   PROCEED TO ALIGNMENT using:")
+                        summary_parts.append(f"   align_and_analyze(fasta_file=\"{output_file}\", ...")
+                        summary_parts.append(f"{'='*60}")
+                    elif output_file:
                         summary_parts.append(f"\n🔧 NEXT STEP: Use fasta_file=\"{output_file}\" for alignment")
-                    
+
                     return '\n'.join(summary_parts)
 
             # Handle metadata extractions

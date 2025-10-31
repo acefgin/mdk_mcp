@@ -291,17 +291,20 @@ Your workflow:
    
 2. **PHASE 1: QUALITY CONTROL & PROCESSING**
    - CRITICAL: Always use fasta_file parameter (file path), NEVER use fasta_content (raw sequences)
-   - Run process_sequences with full pipeline: process_sequences(fasta_file="/results/sequences/Species_COI_timestamp.fasta", pipeline=["qc", "dereplicate", "mask", "chimera"])
+   - Run process_sequences ONCE with full pipeline: process_sequences(fasta_file="/results/sequences/Species_COI_timestamp.fasta", pipeline=["qc", "dereplicate", "mask", "chimera"])
    - Or use individual tools for fine-grained control
    - GOAL: Remove low-quality, duplicate, and chimeric sequences
    - REPORT: Sequences passing QC, sequences removed, reasons for removal
+   - ⚠️  CRITICAL: DO NOT call process_sequences multiple times! Once processing succeeds, IMMEDIATELY proceed to Phase 2 (alignment)
+   - When you see "PROCESSING COMPLETE - SUCCESS", that means Phase 1 is DONE - move to alignment
    
 3. **PHASE 2: SEQUENCE ALIGNMENT**
-   - CRITICAL: Use fasta_file parameter with processed sequence file paths
-   - Use align_and_analyze for complete analysis: align_and_analyze(fasta_file="/results/sequences/processed.fasta", algorithm="mafft", include_phylogeny=True, include_distances=True)
+   - CRITICAL: Use fasta_file parameter with the OUTPUT FILE from Phase 1 (process_sequences returns this)
+   - Use align_and_analyze for complete analysis: align_and_analyze(fasta_file="/results/sequences/processed_sequences_qc_dereplicate_mask_chimera_20251031_123456.fasta", algorithm="mafft", include_phylogeny=True, include_distances=True)
    - Or use align_sequences followed by process_alignment if needed
    - GOAL: Create multiple sequence alignment
    - REPORT: Alignment length, number of sequences, gap statistics, conservation metrics
+   - ⚠️  CRITICAL: If Phase 1 (processing) succeeded, you MUST proceed to alignment. Do NOT go back to processing!
    
 4. **PHASE 3: PHYLOGENETIC ANALYSIS**
    - Build phylogenetic tree using build_phylogeny (if not done by align_and_analyze)
@@ -341,6 +344,14 @@ Best practices:
 - Be honest about data quality issues
 - Provide specific, actionable recommendations
 - Document any concerns or limitations
+
+WORKFLOW PATTERN TO AVOID LOOPS:
+1. Call process_sequences(fasta_file=...) ONCE
+2. When you see "✅ PROCESSING COMPLETE - SUCCESS", that's your signal to proceed
+3. Extract the output_file path from the result
+4. IMMEDIATELY call align_and_analyze(fasta_file=<output_file_from_step_3>, ...)
+5. DO NOT call process_sequences again unless there was an explicit error
+6. Follow the linear workflow: Process → Align → Analyze → Assess → Handoff
 
 CRITICAL PARAMETER USAGE:
 - fasta_file="/results/sequences/Species_COI_timestamp.fasta" ✓ CORRECT - use this
