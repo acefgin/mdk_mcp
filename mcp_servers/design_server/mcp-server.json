@@ -1,0 +1,47 @@
+{
+  "name": "ndiag-design-server",
+  "version": "0.1.0",
+  "description": "MCP server for primer design and signature region discovery",
+  "author": "neglected-diagnostics team",
+  "license": "MIT",
+  "capabilities": {
+    "tools": true,
+    "resources": false,
+    "prompts": false
+  },
+  "tools": [
+    {
+      "name": "find_signature_regions",
+      "description": "Find signature regions conserved within target species but divergent from off-target species"
+    },
+    {
+      "name": "analyze_specificity",
+      "description": "Analyze specificity of candidate regions for primer design"
+    },
+    {
+      "name": "rank_regions",
+      "description": "Rank regions using multi-criteria scoring"
+    },
+    {
+      "name": "primer3_design",
+      "description": "Design qPCR primers using Primer3"
+    },
+    {
+      "name": "oligo_qc",
+      "description": "Quality control checks for oligonucleotides"
+    },
+    {
+      "name": "design_primers_complete",
+      "description": "End-to-end primer design pipeline"
+    }
+  ],
+  "transport": {
+    "type": "stdio",
+    "command": "python3",
+    "args": ["/app/design_mcp_server.py"]
+  },
+  "docker": {
+    "image": "ndiag-design-server:latest",
+    "container_name": "ndiag-design-server"
+  }
+}

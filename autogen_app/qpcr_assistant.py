@@ -667,10 +667,14 @@ class QPCRAssistant:
             "alignment": {
                 "container": os.getenv("MCP_ALIGNMENT_SERVER", "ndiag-alignment-server"),
                 "command": ["python3", "/app/alignment_mcp_server.py"]
+            },
+            "design": {
+                "container": os.getenv("MCP_DESIGN_SERVER", "ndiag-design-server"),
+                "command": ["python3", "/app/design_mcp_server.py"]
             }
             # Add more servers as phases complete:
-            # "design": {...},
             # "validation": {...},
+            # "export": {...}
         }
 
         self.mcp_bridge = MCPClientBridge(server_configs)
