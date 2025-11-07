@@ -16,18 +16,25 @@ RUN apt-get update && apt-get install -y \
     g++ \
     git \
     gosu \
+    gawk \
+    libgsl-dev \
+    libgmp-dev \
+    libmpfr-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install ViennaRNA from source (latest version for better RNA folding)
-RUN wget https://www.tbi.univie.ac.at/RNA/download/ubuntu/ubuntu_22_04/viennarna_2.6.4-1_amd64.deb && \
-    dpkg -i viennarna_2.6.4-1_amd64.deb || true && \
-    apt-get install -f -y && \
-    rm viennarna_2.6.4-1_amd64.deb && \
-    rm -rf /var/lib/apt/lists/*
+# Install ViennaRNA from source (build it for Ubuntu 22.04)
+RUN wget https://www.tbi.univie.ac.at/RNA/download/sourcecode/2_6_x/ViennaRNA-2.6.4.tar.gz && \
+    tar -xzf ViennaRNA-2.6.4.tar.gz && \
+    cd ViennaRNA-2.6.4 && \
+    ./configure --prefix=/usr --without-perl --without-python && \
+    make -j$(nproc) && \
+    make install && \
+    cd .. && \
+    rm -rf ViennaRNA-2.6.4 ViennaRNA-2.6.4.tar.gz
 
 # Verify installations
-RUN primer3_core --version || echo "primer3_core installed" && \
-    RNAfold --version
+RUN which primer3_core && primer3_core --version || echo "primer3_core version check returned: $?"
+RUN which RNAfold && RNAfold --version || echo "RNAfold version check returned: $?"
 
 # Set working directory
 WORKDIR /app
