@@ -13,7 +13,10 @@ Skills that automatically suggest themselves based on what you're working on:
 - 🔧 **mcp-server-dev** - MCP server development patterns
 - 🤖 **ag2-agent-dev** - AG2 multi-agent orchestration
 - 🐍 **python-dev-guidelines** - Python async/await best practices
-- 🧬 **bioinformatics-workflow** - Sequence analysis workflows
+- 🧬 **biopython-dev** - BioPython patterns (SeqIO, Entrez, Phylo, AlignIO)
+- 🧪 **primer-design-tools** - Primer3, ViennaRNA, qPCR primer design
+- 🛠️  **seq-analysis-tools** - seqkit, vsearch, MAFFT, MUSCLE, Clustal Omega ✨ **NEW!**
+- 🔬 **bioinformatics-workflow** - Sequence analysis workflows
 - 🐳 **docker-container-dev** - Container and deployment patterns
 - 🧪 **testing-and-qa** - pytest and MCP testing strategies
 
@@ -21,6 +24,8 @@ Skills that automatically suggest themselves based on what you're working on:
 Autonomous agents for complex tasks:
 - 📋 **mcp-tool-reviewer** - Review MCP tool implementations
 - 🧬 **qpcr-workflow-planner** - Plan comprehensive qPCR workflows
+- 🧪 **test-writer** - Generate pytest tests for MCP tools
+- 🐳 **docker-debugger** - Diagnose and fix Docker container issues ✨ **NEW!**
 
 ### Smart Hooks
 - ✅ **skill-activation-prompt** - Auto-suggests skills based on context
@@ -28,6 +33,8 @@ Autonomous agents for complex tasks:
 
 ### Slash Commands
 - 📝 **/dev-docs** - Create comprehensive development documentation
+- 🧪 **/test-mcp** - Run comprehensive MCP server tests
+- 🤖 **/ag2-test** - Test AG2 multi-agent workflows ✨ **NEW!**
 
 ---
 
@@ -77,17 +84,19 @@ Section: database_server
 
 ## 📦 What's Included
 
-### Skills (7)
+### Skills (9)
 
 | Skill | Purpose | Priority | Triggers |
 |-------|---------|----------|----------|
 | **mcp-server-dev** | MCP tool patterns | High | "MCP tool", "MCP server", editing `*_mcp_server.py` |
 | **ag2-agent-dev** | AG2 agent patterns | High | "agent", "AG2", editing `autogen_app/*.py` |
 | **python-dev-guidelines** | Python best practices | High | "python", "async", editing `*.py` |
+| **biopython-dev** | BioPython patterns | High | "SeqIO", "Entrez", "Phylo", "parse FASTA" |
+| **primer-design-tools** | Primer3, ViennaRNA | High | "Primer3", "Tm", "hairpin", "signature region" |
+| **seq-analysis-tools** ✨ | CLI tools integration | High | "seqkit", "vsearch", "MAFFT", "subprocess" |
 | **bioinformatics-workflow** | Sequence analysis | High | "qPCR", "primer", "sequence", "alignment" |
 | **docker-container-dev** | Containerization | Medium | "Docker", editing `Dockerfile`, `docker-compose.yml` |
 | **testing-and-qa** | Testing patterns | Medium | "test", "pytest", editing `test_*.py` |
-| **skill-developer** | Skill creation | High | "create skill", "skill system" |
 
 ### Hooks (2)
 
@@ -96,18 +105,22 @@ Section: database_server
 | **skill-activation-prompt** | UserPromptSubmit | ✅ YES | Auto-suggests skills |
 | **post-tool-use-tracker** | PostToolUse | ✅ YES | Tracks file changes |
 
-### Agents (2)
+### Agents (4)
 
 | Agent | Purpose | When to Use |
 |-------|---------|-------------|
 | **mcp-tool-reviewer** | Review MCP implementations | After implementing/modifying tools |
 | **qpcr-workflow-planner** | Plan qPCR workflows | Before starting new assay design |
+| **test-writer** | Generate pytest tests | When adding new MCP tools |
+| **docker-debugger** ✨ | Diagnose Docker issues | When containers fail to build/run |
 
-### Commands (1)
+### Commands (3)
 
 | Command | Purpose |
 |---------|---------|
 | **/dev-docs [task]** | Create dev documentation |
+| **/test-mcp [server]** | Run comprehensive MCP server tests |
+| **/ag2-test [mode]** ✨ | Test AG2 multi-agent workflows |
 
 ---
 
@@ -349,6 +362,19 @@ When you mention bioinformatics terms:
 After setup, verify everything works:
 
 ```bash
+# COMPREHENSIVE VERIFICATION (Recommended!) ✨ NEW!
+cd .claude
+./verify-infrastructure.sh
+# Expected: ✅ ALL TESTS PASSED! (56/56)
+# Tests: Files, permissions, JSON, triggers, dependencies, content, integration
+
+# HOOK TESTING
+cd .claude/hooks
+./test-hooks.sh
+# Expected: ✅ ALL TESTS PASSED! (12/12)
+
+# Manual verification (if needed):
+
 # 1. Hooks are executable
 ls -la .claude/hooks/*.sh
 # Expected: -rwxr-xr-x
@@ -361,13 +387,13 @@ cat .claude/skills/skill-rules.json | jq .
 ls .claude/hooks/node_modules/
 # Expected: Packages present
 
-# 4. Test skill activation
-# Edit mcp_servers/database_server/database_mcp_server.py
-# Type: "add MCP tool"
-# Expected: Skill suggestions appear
+# 4. Test skill activation (BioPython example)
+export CLAUDE_PROJECT_DIR="/home/raycifeng/mdk_mcp"
+echo '{"prompt": "parse FASTA with SeqIO"}' | .claude/hooks/skill-activation-prompt.sh
+# Expected: → biopython-dev skill suggested
 
 # 5. Test file tracking
-# Make an edit to any Python file
+# Edit mcp_servers/database_server/database_mcp_server.py
 # Expected: Post-tool-use message with reminders
 ```
 
@@ -406,10 +432,13 @@ ls -la .claude/hooks/*.sh
 ## 📊 Statistics
 
 **Total Components:**
-- 7 Skills (covering all mdk_mcp development areas)
+- 9 Skills (5 comprehensive + 4 lightweight)
+  - Comprehensive: mcp-server-dev, ag2-agent-dev, biopython-dev, primer-design-tools, seq-analysis-tools ✨
+  - Lightweight: python-dev-guidelines, bioinformatics-workflow, docker-container-dev, testing-and-qa
 - 2 Essential Hooks (auto-activation + tracking)
-- 2 Specialized Agents (review + planning)
-- 1 Slash Command (dev docs)
+- 4 Specialized Agents (review, planning, testing, debugging) ✨
+- 3 Slash Commands (dev docs, MCP testing, AG2 testing) ✨
+- 2 Testing Scripts (test-hooks.sh: 12 tests, verify-infrastructure.sh: 56 tests) ✨
 
 **Customization Level:**
 - ✅ Fully adapted for Python/MCP/AG2 development
