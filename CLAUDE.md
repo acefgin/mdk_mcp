@@ -43,6 +43,99 @@ This is **mdk_mcp** (Neglected Diagnostics MCP), an MCP-based system for biologi
 - **Docker**: Containerized MCP servers with isolated dependencies
 - **Kubernetes**: Production orchestration and auto-scaling
 
+## Claude Code Infrastructure
+
+**This project has comprehensive Claude Code infrastructure** (located in `.claude/`) providing development support through auto-activating skills, specialized agents, and testing commands.
+
+### Auto-Activating Skills
+
+Skills that automatically suggest themselves based on your work:
+
+- **mcp-server-dev** (791 lines) - MCP server development patterns, tool handlers, async patterns
+  - Triggers: "MCP tool", "MCP server", editing `*_mcp_server.py`
+
+- **ag2-agent-dev** (818 lines) - AG2 multi-agent orchestration, GroupChat, agent collaboration
+  - Triggers: "AG2", "agent", "multi-agent", editing `autogen_app/*.py`
+
+- **biopython-dev** (884 lines) - BioPython patterns for SeqIO, Entrez, Phylo, AlignIO
+  - Triggers: "BioPython", "SeqIO", "parse FASTA", "Entrez", "phylogenetic tree"
+
+- **primer-design-tools** (1,043 lines) - Primer3, ViennaRNA, qPCR primer design, signature regions
+  - Triggers: "Primer3", "primer design", "Tm calculation", "hairpin", "signature region"
+
+- **seq-analysis-tools** (864 lines) - CLI tools integration: seqkit, vsearch, MAFFT, MUSCLE, Clustal Omega
+  - Triggers: "seqkit", "vsearch", "MAFFT", "subprocess", "alignment strategy"
+
+- **python-dev-guidelines**, **bioinformatics-workflow**, **docker-container-dev**, **testing-and-qa** - Lightweight skills for general patterns
+
+### Specialized Agents
+
+Autonomous agents for complex tasks (invoke with "Use [agent-name] agent to..."):
+
+- **mcp-tool-reviewer** - Reviews MCP tool implementations for protocol compliance, code quality, error handling
+- **qpcr-workflow-planner** - Plans comprehensive qPCR assay design workflows with tool orchestration
+- **test-writer** - Generates pytest test scaffolding for MCP tools automatically
+- **docker-debugger** - Diagnoses Docker container build/runtime issues for all 4 server setups
+
+### Slash Commands
+
+Quick workflows via slash commands:
+
+- **/dev-docs [task]** - Creates comprehensive development documentation (plan, context, tasks)
+- **/test-mcp [server]** - Runs comprehensive MCP server tests (pytest → Docker → Inspector → report)
+- **/ag2-test [mode]** - Tests AG2 multi-agent workflows (quick/full/agent/bridge modes)
+
+### Infrastructure Verification
+
+Automated health checks:
+
+```bash
+# Verify entire infrastructure (56 tests)
+cd .claude && ./verify-infrastructure.sh
+
+# Test hooks functionality (12 tests)
+cd .claude/hooks && ./test-hooks.sh
+```
+
+### Usage Examples
+
+**Example 1: Parsing FASTA files**
+```
+You: "I need to parse FASTA files with BioPython in the database server"
+→ biopython-dev skill activates automatically
+→ Provides: Safe parsing patterns, error handling, SeqIO best practices
+```
+
+**Example 2: Designing primers**
+```
+You: "Calculate Tm for primers using nearest-neighbor method"
+→ primer-design-tools skill activates
+→ Provides: Primer3 integration, BioPython MeltingTemp, salt corrections
+```
+
+**Example 3: Integrating CLI tools**
+```
+You: "Add seqkit length filtering to processing server"
+→ seq-analysis-tools skill activates
+→ Provides: Async subprocess patterns, timeout handling, error capture
+```
+
+**Example 4: Docker debugging**
+```
+You: "Use docker-debugger agent to diagnose database server startup failure"
+→ Agent analyzes: Dockerfile, docker-compose.yml, logs, dependencies
+→ Provides: Specific diagnostics and fix recommendations
+```
+
+**Example 5: Testing MCP servers**
+```
+You: "/test-mcp database"
+→ Runs: pytest → Docker build → MCP Inspector → sample tool call
+→ Generates: Markdown report with pass/fail status
+```
+
+**See `.claude/README.md` for complete infrastructure documentation.**
+
 ## Development Commands
 
 ### Build and Run MCP Servers
@@ -210,6 +303,8 @@ The `extract_sequence_columns()` tool parses FASTA headers and GenBank records t
 
 ## Common Development Tasks
 
+**💡 Tip: The Claude Code infrastructure (`.claude/`) provides automatic assistance for all development tasks. Skills will auto-activate based on your work context, and you can invoke agents or slash commands for specialized help.**
+
 ### Adding a New MCP Tool
 
 1. Add tool definition to `handle_list_tools()`
@@ -217,6 +312,8 @@ The `extract_sequence_columns()` tool parses FASTA headers and GenBank records t
 3. Implement async tool function
 4. Add unit tests in `tests/`
 5. Update README.md with usage examples
+
+**Claude Code assistance**: The **mcp-server-dev** skill auto-activates when you mention "MCP tool" or edit `*_mcp_server.py` files. Use the **test-writer** agent to generate test scaffolding: `"Use test-writer agent to generate tests for [tool_name]"`
 
 ### Testing MCP Tools Locally
 
@@ -227,12 +324,16 @@ async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
     # Parse response
 ```
 
+**Claude Code assistance**: Use `/test-mcp [server]` to run comprehensive tests (pytest → Docker → MCP Inspector → sample tool call). For AG2 testing, use `/ag2-test [mode]`.
+
 ### Debugging MCP Communication
 
 - Set `LOG_LEVEL=DEBUG` in environment
 - Check logs for tool call arguments and responses
 - Use `logger.info()` and `logger.error()` liberally
 - MCP communication is JSON-based over stdio
+
+**Claude Code assistance**: For Docker issues, use the **docker-debugger** agent: `"Use docker-debugger agent to diagnose [server_name] startup failure"`. The agent analyzes Dockerfile, docker-compose.yml, logs, and dependencies.
 
 ## Roadmap Reference
 
@@ -361,6 +462,33 @@ sequences = await bridge.call_tool("database", "get_sequences", {
 - ✅ MCP testing quick reference card
 - ✅ Automated test script (`test_mcp_server.sh`)
 - ✅ Updated documentation with testing sections
+
+### Claude Code Infrastructure
+- ✅ **9 auto-activating skills** (8,508 total lines of infrastructure)
+  - mcp-server-dev (791 lines), ag2-agent-dev (818 lines), biopython-dev (884 lines)
+  - primer-design-tools (1,043 lines), seq-analysis-tools (864 lines)
+  - python-dev-guidelines, bioinformatics-workflow, docker-container-dev, testing-and-qa
+- ✅ **4 specialized agents** for complex tasks
+  - mcp-tool-reviewer (501 lines) - MCP protocol compliance review
+  - qpcr-workflow-planner (615 lines) - qPCR assay design planning
+  - test-writer (561 lines) - Automated pytest test generation
+  - docker-debugger (778 lines) - Docker troubleshooting diagnostics
+- ✅ **3 slash commands** for streamlined workflows
+  - /dev-docs - Comprehensive development documentation generation
+  - /test-mcp (296 lines) - MCP server testing (pytest → Docker → Inspector)
+  - /ag2-test (501 lines) - AG2 multi-agent workflow testing
+- ✅ **2 smart hooks** for context awareness
+  - skill-activation-prompt - Auto-suggests skills based on work context
+  - post-tool-use-tracker - Tracks file changes and provides reminders
+- ✅ **Automated verification** (68 tests total, 100% passing)
+  - test-hooks.sh (12 tests) - Hook functionality validation
+  - verify-infrastructure.sh (56 tests) - Complete infrastructure health checks
+- ✅ **Comprehensive documentation**
+  - Priority 1, 2, 3 completion summaries
+  - Complete infrastructure summary
+  - Usage examples and patterns for all components
+
+**Infrastructure Coverage**: 100% across all development areas (MCP, AG2, BioPython, primer design, CLI tools, Docker, testing)
 
 ## What's Next (Phase 4)
 

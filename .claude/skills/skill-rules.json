@@ -158,6 +158,161 @@
                 ]
             }
         },
+        "biopython-dev": {
+            "type": "domain",
+            "enforcement": "suggest",
+            "priority": "high",
+            "description": "BioPython best practices for sequence parsing, database access, phylogenetics, and file I/O",
+            "promptTriggers": {
+                "keywords": [
+                    "BioPython",
+                    "Biopython",
+                    "SeqIO",
+                    "Entrez",
+                    "Phylo",
+                    "AlignIO",
+                    "SeqRecord",
+                    "Seq object",
+                    "parse FASTA",
+                    "parse GenBank",
+                    "NCBI query",
+                    "phylogenetic tree",
+                    "distance matrix",
+                    "alignment I/O",
+                    "sequence parsing"
+                ],
+                "intentPatterns": [
+                    "(parse|read|write).*?(FASTA|GenBank|sequence.*?file)",
+                    "(create|build).*?(phylogenetic|phylogeny).*?tree",
+                    "(fetch|retrieve|query).*?(NCBI|Entrez)",
+                    "(use|using|with).*?(BioPython|SeqIO|Phylo|AlignIO)",
+                    "(extract|get).*?(sequence.*?metadata|SeqRecord)"
+                ]
+            },
+            "fileTriggers": {
+                "pathPatterns": [
+                    "mcp_servers/**/*.py"
+                ],
+                "pathExclusions": [
+                    "**/__pycache__/**",
+                    "**/*.pyc"
+                ],
+                "contentPatterns": [
+                    "from Bio import",
+                    "import Bio\\.",
+                    "SeqIO\\.parse",
+                    "SeqIO\\.write",
+                    "Entrez\\.",
+                    "Phylo\\.",
+                    "AlignIO\\.",
+                    "SeqRecord",
+                    "MultipleSeqAlignment"
+                ]
+            }
+        },
+        "primer-design-tools": {
+            "type": "domain",
+            "enforcement": "suggest",
+            "priority": "high",
+            "description": "Primer3, ViennaRNA, and qPCR primer design patterns for species-specific diagnostics",
+            "promptTriggers": {
+                "keywords": [
+                    "Primer3",
+                    "primer design",
+                    "qPCR primer",
+                    "ViennaRNA",
+                    "secondary structure",
+                    "hairpin",
+                    "primer dimer",
+                    "homodimer",
+                    "heterodimer",
+                    "melting temperature",
+                    "Tm calculation",
+                    "signature region",
+                    "oligo",
+                    "oligonucleotide",
+                    "GC content",
+                    "primer quality"
+                ],
+                "intentPatterns": [
+                    "(design|create|find).*?primer",
+                    "(calculate|compute).*?(Tm|melting.*?temperature)",
+                    "(check|analyze|predict).*?(secondary.*?structure|hairpin|dimer)",
+                    "(find|discover|identify).*?signature.*?region",
+                    "(use|using|with).*?(Primer3|ViennaRNA)"
+                ]
+            },
+            "fileTriggers": {
+                "pathPatterns": [
+                    "mcp_servers/design_server/**/*.py"
+                ],
+                "contentPatterns": [
+                    "import primer3",
+                    "primer3\\.design",
+                    "RNAfold",
+                    "RNAduplex",
+                    "ViennaRNA",
+                    "find_signature_regions",
+                    "calculate.*tm",
+                    "hairpin",
+                    "homodimer"
+                ]
+            }
+        },
+        "seq-analysis-tools": {
+            "type": "domain",
+            "enforcement": "suggest",
+            "priority": "high",
+            "description": "CLI bioinformatics tools integration: seqkit, vsearch, MAFFT, MUSCLE, Clustal Omega",
+            "promptTriggers": {
+                "keywords": [
+                    "seqkit",
+                    "vsearch",
+                    "MAFFT",
+                    "MUSCLE",
+                    "Clustal Omega",
+                    "clustalo",
+                    "subprocess",
+                    "CLI tool",
+                    "command line tool",
+                    "external tool",
+                    "alignment strategy",
+                    "clustering",
+                    "dereplication",
+                    "chimera detection",
+                    "low complexity masking",
+                    "FASTA statistics",
+                    "sequence filtering",
+                    "DUST masking",
+                    "UCHIME"
+                ],
+                "intentPatterns": [
+                    "(run|execute|call).*?(CLI|command.*?line|external).*?tool",
+                    "(use|integrate|with).*?(seqkit|vsearch|MAFFT|MUSCLE|Clustal)",
+                    "(create|use).*?subprocess",
+                    "(alignment|align).*?strategy",
+                    "(cluster|dereplicate|chimera|mask).*?sequence"
+                ]
+            },
+            "fileTriggers": {
+                "pathPatterns": [
+                    "mcp_servers/processing_server/**/*.py",
+                    "mcp_servers/alignment_server/**/*.py"
+                ],
+                "contentPatterns": [
+                    "asyncio\\.create_subprocess_exec",
+                    "subprocess\\.run",
+                    "seqkit",
+                    "vsearch",
+                    "mafft",
+                    "muscle",
+                    "clustalo",
+                    "--derep",
+                    "--cluster",
+                    "--uchime"
+                ]
+            }
+        },
         "bioinformatics-workflow": {
             "type": "domain",
             "enforcement": "suggest",

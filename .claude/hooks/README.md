@@ -13,7 +13,7 @@ Claude Code hooks for automatic skill activation and file tracking in the mdk_mc
 **Integration:**
 ```bash
 # Already installed! Just need to add to settings.json
-cd /home/cxl/MDK_Design/mdk_mcp/.claude/hooks
+cd $CLAUDE_PROJECT_DIR/.claude/hooks
 npm install  # Install TypeScript dependencies
 ```
 
@@ -74,8 +74,8 @@ npm install  # Install TypeScript dependencies
 ## Quick Setup
 
 ```bash
-# 1. Navigate to project
-cd /home/cxl/MDK_Design/mdk_mcp
+# 1. Navigate to project (replace with your path)
+cd /path/to/mdk_mcp
 
 # 2. Install hook dependencies
 cd .claude/hooks
