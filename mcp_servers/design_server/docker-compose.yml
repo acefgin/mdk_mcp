@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  design-server:
+    build: .
+    container_name: ndiag-design-server
+    image: ndiag-design-server:latest
+    stdin_open: true  # Keep stdin open for MCP stdio communication
+    tty: false        # No TTY needed for stdio
+    volumes:
+      - ../../results:/results
+      - design-temp:/tmp/mcp_design
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - MCP_SERVER_PORT=8003
+      - TEMP_DIR=/tmp/mcp_design
+    restart: unless-stopped
+    networks:
+      - mcp-network
+
+volumes:
+  design-temp:
+    driver: local
+
+networks:
+  mcp-network:
+    driver: bridge

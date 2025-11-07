@@ -1,0 +1,299 @@
+{
+    "version": "1.0",
+    "description": "Skill activation triggers for mdk_mcp - Python-based bioinformatics MCP platform",
+    "skills": {
+        "skill-developer": {
+            "type": "domain",
+            "enforcement": "suggest",
+            "priority": "high",
+            "description": "Meta-skill for creating and managing Claude Code skills",
+            "promptTriggers": {
+                "keywords": [
+                    "skill system",
+                    "create skill",
+                    "add skill",
+                    "skill triggers",
+                    "skill rules",
+                    "hook system",
+                    "skill development",
+                    "skill-rules.json"
+                ],
+                "intentPatterns": [
+                    "(how do|how does|explain).*?skill",
+                    "(create|add|modify|build).*?skill",
+                    "skill.*?(work|trigger|activate|system)"
+                ]
+            }
+        },
+        "mcp-server-dev": {
+            "type": "domain",
+            "enforcement": "suggest",
+            "priority": "high",
+            "description": "MCP server development patterns for Python-based bioinformatics tools",
+            "promptTriggers": {
+                "keywords": [
+                    "MCP server",
+                    "MCP tool",
+                    "mcp tool",
+                    "server development",
+                    "tool handler",
+                    "handle_call_tool",
+                    "handle_list_tools",
+                    "types.Tool",
+                    "inputSchema",
+                    "stdio server",
+                    "bioinformatics tool"
+                ],
+                "intentPatterns": [
+                    "(create|add|implement|build).*?(MCP|mcp).*?(server|tool)",
+                    "(add|create).*?(tool|handler).*?(MCP|mcp)",
+                    "(implement|build).*?(database|processing|alignment|design).*?server",
+                    "(how to|best practice).*?(MCP|mcp).*?(tool|server)"
+                ]
+            },
+            "fileTriggers": {
+                "pathPatterns": [
+                    "mcp_servers/**/*_mcp_server.py",
+                    "mcp_servers/**/config.py",
+                    "mcp_servers/**/tests/*.py"
+                ],
+                "pathExclusions": [
+                    "**/__pycache__/**",
+                    "**/*.pyc"
+                ],
+                "contentPatterns": [
+                    "@server\\.list_tools",
+                    "@server\\.call_tool",
+                    "types\\.Tool",
+                    "inputSchema",
+                    "async def handle_"
+                ]
+            }
+        },
+        "ag2-agent-dev": {
+            "type": "domain",
+            "enforcement": "suggest",
+            "priority": "high",
+            "description": "AG2 (AutoGen) multi-agent development patterns for orchestration",
+            "promptTriggers": {
+                "keywords": [
+                    "AG2",
+                    "AutoGen",
+                    "agent",
+                    "multi-agent",
+                    "agent collaboration",
+                    "ConversableAgent",
+                    "AssistantAgent",
+                    "UserProxyAgent",
+                    "GroupChat",
+                    "agent orchestration",
+                    "workflow coordination"
+                ],
+                "intentPatterns": [
+                    "(create|add|implement|build).*?agent",
+                    "(setup|configure).*?(AG2|AutoGen|multi-agent)",
+                    "(how to|best practice).*?agent.*?(collaboration|orchestration)",
+                    "(define|create).*?agent.*?(role|capability)"
+                ]
+            },
+            "fileTriggers": {
+                "pathPatterns": [
+                    "autogen_app/**/*.py",
+                    "autogen_app/OAI_CONFIG_LIST.json"
+                ],
+                "pathExclusions": [
+                    "**/__pycache__/**",
+                    "**/*.pyc"
+                ],
+                "contentPatterns": [
+                    "ConversableAgent",
+                    "AssistantAgent",
+                    "UserProxyAgent",
+                    "GroupChat",
+                    "from.*autogen",
+                    "import.*autogen"
+                ]
+            }
+        },
+        "python-dev-guidelines": {
+            "type": "domain",
+            "enforcement": "suggest",
+            "priority": "high",
+            "description": "Python development best practices for async/await, type hints, and testing",
+            "promptTriggers": {
+                "keywords": [
+                    "python",
+                    "async",
+                    "await",
+                    "type hints",
+                    "typing",
+                    "pytest",
+                    "python testing",
+                    "python best practice",
+                    "async function",
+                    "coroutine"
+                ],
+                "intentPatterns": [
+                    "(write|create|implement).*?python.*?(function|class|module)",
+                    "(add|implement).*?(async|await|type.*?hint)",
+                    "(how to|best practice).*?python",
+                    "(test|testing).*?python.*?(function|class)"
+                ]
+            },
+            "fileTriggers": {
+                "pathPatterns": [
+                    "**/*.py"
+                ],
+                "pathExclusions": [
+                    "**/__pycache__/**",
+                    "**/*.pyc",
+                    "**/tests/**",
+                    "**/test_*.py"
+                ],
+                "contentPatterns": [
+                    "async def",
+                    "await ",
+                    "from typing import",
+                    "import typing"
+                ]
+            }
+        },
+        "bioinformatics-workflow": {
+            "type": "domain",
+            "enforcement": "suggest",
+            "priority": "high",
+            "description": "Bioinformatics workflow patterns for sequence analysis and primer design",
+            "promptTriggers": {
+                "keywords": [
+                    "sequence",
+                    "qPCR",
+                    "primer",
+                    "alignment",
+                    "phylogeny",
+                    "FASTA",
+                    "GenBank",
+                    "COI",
+                    "16S",
+                    "ITS",
+                    "taxonomy",
+                    "species identification",
+                    "signature region",
+                    "sequence analysis",
+                    "quality control",
+                    "dereplicate",
+                    "chimera"
+                ],
+                "intentPatterns": [
+                    "(design|create|find).*?(primer|qPCR|assay)",
+                    "(retrieve|get|fetch).*?sequence",
+                    "(align|alignment|phylogeny).*?sequence",
+                    "(analyze|analysis).*?(sequence|FASTA|alignment)",
+                    "(quality control|QC|filter).*?sequence"
+                ]
+            },
+            "fileTriggers": {
+                "pathPatterns": [
+                    "mcp_servers/database_server/**/*.py",
+                    "mcp_servers/processing_server/**/*.py",
+                    "mcp_servers/alignment_server/**/*.py",
+                    "mcp_servers/design_server/**/*.py"
+                ],
+                "contentPatterns": [
+                    "FASTA",
+                    "GenBank",
+                    "BioPython",
+                    "SeqIO",
+                    "Entrez",
+                    "alignment",
+                    "phylogeny"
+                ]
+            }
+        },
+        "docker-container-dev": {
+            "type": "domain",
+            "enforcement": "suggest",
+            "priority": "medium",
+            "description": "Docker containerization patterns for MCP servers and services",
+            "promptTriggers": {
+                "keywords": [
+                    "Docker",
+                    "Dockerfile",
+                    "docker-compose",
+                    "container",
+                    "containerize",
+                    "docker build",
+                    "docker image",
+                    "docker network"
+                ],
+                "intentPatterns": [
+                    "(create|build|update).*?(Dockerfile|docker.*?compose)",
+                    "(containerize|dockerize).*?(server|service|application)",
+                    "(how to|best practice).*?(docker|container)"
+                ]
+            },
+            "fileTriggers": {
+                "pathPatterns": [
+                    "**/Dockerfile",
+                    "**/docker-compose*.yml",
+                    "**/docker-compose*.yaml"
+                ]
+            }
+        },
+        "testing-and-qa": {
+            "type": "domain",
+            "enforcement": "suggest",
+            "priority": "medium",
+            "description": "Testing patterns for MCP servers, agents, and bioinformatics pipelines",
+            "promptTriggers": {
+                "keywords": [
+                    "test",
+                    "testing",
+                    "pytest",
+                    "unit test",
+                    "integration test",
+                    "test coverage",
+                    "mock",
+                    "fixture",
+                    "test case"
+                ],
+                "intentPatterns": [
+                    "(write|create|add).*?test",
+                    "(test|testing).*?(function|class|tool|server)",
+                    "(how to|best practice).*?(test|testing|pytest)"
+                ]
+            },
+            "fileTriggers": {
+                "pathPatterns": [
+                    "**/tests/**/*.py",
+                    "**/test_*.py",
+                    "**/*_test.py"
+                ],
+                "contentPatterns": [
+                    "import pytest",
+                    "def test_",
+                    "@pytest\\.fixture",
+                    "@pytest\\.mark"
+                ]
+            }
+        }
+    },
+    "notes": {
+        "enforcement_types": {
+            "suggest": "Skill suggestion appears but doesn't block execution",
+            "block": "Requires skill to be used before proceeding (guardrail)",
+            "warn": "Shows warning but allows proceeding"
+        },
+        "priority_levels": {
+            "critical": "Highest - Always trigger when matched",
+            "high": "Important - Trigger for most matches",
+            "medium": "Moderate - Trigger for clear matches",
+            "low": "Optional - Trigger only for explicit matches"
+        },
+        "customization": {
+            "pathPatterns": "Configured for mdk_mcp Python project structure",
+            "keywords": "Tailored for bioinformatics and MCP development",
+            "intentPatterns": "Optimized for sequence analysis and agent development workflows"
+        }
+    }
+}
+

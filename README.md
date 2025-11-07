@@ -7,7 +7,7 @@
 
 An **MCP (Model Context Protocol)** based multi-agent AI system for designing species-specific qPCR assays for molecular diagnostics. The system uses AG2 (formerly AutoGen) to orchestrate specialized AI agents that collaborate to retrieve sequences, analyze data, and recommend primer design strategies.
 
-**🎉 Phase 3 Complete!** The system now includes alignment and phylogenetic analysis capabilities with 21 total MCP tools available.
+**🎉 Phase 4 Complete!** The system now includes complete primer design capabilities with signature region discovery, Primer3 integration, and quality control. **27 total MCP tools** available across database, processing, alignment, and design servers.
 
 ## 🎯 What is mdk_mcp?
 
@@ -166,16 +166,15 @@ Four specialized AI agents collaborate in a clear pipeline for qPCR design:
 |-------|------|-------------|-------|-------|
 | **Coordinator** | Workflow Manager | Plans workflow, orchestrates agents, synthesizes results | 0 tools | Planning + Summary |
 | **DatabaseAgent** | Data Retrieval | Retrieves sequences from NCBI/BOLD/SILVA/UNITE/SRA | **5 tools*** | Phase 1: Retrieval |
-| **AnalystAgent** | Data Curator & Analyst | QC + processing + alignment + phylogenetics + quality assessment | **10 tools** | Phase 2: Curation |
-| **PrimerDesignAgent** | Primer Designer | Evaluates regions, designs primers, validation strategy | **0 tools**† | Phase 3: Design |
+| **AnalystAgent** | Data Curator & Analyst | QC + processing + alignment + phylogenetics + quality assessment | **10 tools** | Phase 2-3: Curation & Analysis |
+| **PrimerDesignAgent** | Primer Designer | Signature region discovery + Primer3 design + oligo QC | **6 tools** | Phase 4: Design |
 
-\*DatabaseAgent: 5 tools active, 6 more planned (gget suite + advanced SRA)  
-†PrimerDesignAgent currently operates in advisory mode (Phase 4 tools coming soon)
+\*DatabaseAgent: 5 tools active, 6 more planned (gget suite + advanced SRA)
 
 **Architecture Rationale:**
 - **Clear Pipeline**: Data flows linearly through specialized agents (Retrieve → Curate → Design)
 - **Separation of Concerns**: Each agent has a single, focused responsibility
-- **Balanced Workload**: 5 vs 10 vs 0 tools (15 active total) - no agent is overloaded
+- **Balanced Workload**: 5 + 10 + 6 tools (21 active total, 27 including planned) - optimized distribution
 - **Quality Gates**: AnalystAgent assesses data quality before passing to primer design
 - **Scalable**: Easy to add tools to any agent without affecting others (6 database tools + 5 design tools planned)
 
@@ -189,7 +188,7 @@ User Request
 └──────────┬──────────┘
            ↓
 ┌─────────────────────┐
-│  DatabaseAgent      │  Phase 1: Data Retrieval (5 tools, 6 planned)
+│  DatabaseAgent      │  Phase 1: Data Retrieval (5 tools)
 │  - get_sequences    │  • Retrieve from NCBI/BOLD/SILVA/UNITE
 │  - get_taxonomy     │  • Verify species names
 │  - get_neighbors    │  • Identify off-targets
@@ -212,7 +211,7 @@ User Request
            │ Curated data + quality assessment + candidate regions
            ↓
 ┌─────────────────────┐
-│ PrimerDesignAgent   │  Phase 3: Primer Design & Validation (Advisory)
+│ PrimerDesignAgent   │  Phase 4: Primer Design & QC (6 tools)
 │  - Evaluate regions │  • Assess candidate regions
 │  - Design strategy  │  • Recommend primer parameters
 │  - Validation plan  │  • In-silico validation strategy
@@ -221,7 +220,7 @@ User Request
            │ Primer recommendations + validation protocol
            ↓
 ┌─────────────────────┐
-│   Coordinator       │  Phase 4: Summary & Report
+│   Coordinator       │  Workflow Orchestration & Summary
 │  - Synthesize       │  • Comprehensive workflow summary
 │  - Report           │  • Document limitations
 │  - Next steps       │  • Wet lab implementation guide
@@ -330,42 +329,50 @@ Multiple sequence alignment and phylogenetic analysis:
    - Configurable pipeline steps
    - Comprehensive analysis output
 
-#### **Design Server** (Phase 4 🚧 Planned)
-**Used by:** PrimerDesignAgent (Phase 3: Primer Design & Validation)
+#### **Design Server** (Phase 4 ✅ Complete - 6 Tools)
+**Used by:** PrimerDesignAgent (Phase 4: Primer Design & Validation)
+**Container:** `ndiag-design-server`
 
-Signature region discovery and primer design (coming soon):
+Complete primer design pipeline with signature region discovery and Primer3 integration:
 
 1. **find_signature_regions** - Automated candidate region discovery:
-   - Identify conserved regions within target species
-   - Identify variable regions between target and off-targets
-   - Score regions by conservation/divergence metrics
-   - Return ranked candidate regions for primer placement
+   - Sliding window analysis (150bp windows, 10bp steps)
+   - Conservation scoring within target species (Shannon entropy)
+   - Divergence scoring vs off-target species
+   - GC content and complexity metrics
+   - Returns ranked candidate regions
 
-2. **design_primers** - Primer3 integration:
-   - Automated primer design for candidate regions
-   - Configurable parameters (Tm, GC%, length, amplicon size)
-   - Multiple primer set generation
-   - Degenerate primer support
+2. **analyze_specificity** - Specificity analysis:
+   - Target vs off-target comparison
+   - SNP identification for discrimination
+   - Suitability scoring for primer design
+   - Flags high-specificity regions
 
-3. **validate_primers** - Oligo quality assessment:
-   - Thermodynamic analysis
-   - Secondary structure prediction (hairpins, dimers)
-   - GC clamp assessment
-   - Primer efficiency prediction
+3. **rank_regions** - Multi-criteria ranking:
+   - Composite scoring with configurable weights
+   - Conservation (40%), Specificity (40%), Complexity (20%)
+   - Returns prioritized candidate list
+   - Customizable weighting schemes
 
-4. **insilico_pcr** - In-silico PCR simulation:
-   - Test primers against target sequences
-   - Test primers against off-target sequences
-   - Predict amplicon sizes
-   - Identify potential cross-reactivity
+4. **primer3_design** - Primer3 integration:
+   - Full Primer3 wrapper with all parameters
+   - Configurable constraints (size, Tm, GC, product size)
+   - Returns multiple primer pairs per region
+   - Default: 18-27bp, Tm 57-63°C, GC 40-60%
 
-5. **blast_primers** - BLAST-based specificity:
-   - BLAST primers against nt database
-   - Identify potential off-target hits
-   - Calculate specificity scores
-   - Generate specificity report
+5. **oligo_qc** - Oligonucleotide quality control:
+   - Tm calculation with salt correction
+   - Secondary structure analysis (ViennaRNA)
+   - Hairpin and homodimer detection
+   - Pass/fail flags with quality metrics
 
-**Status:** Tools designed and specified - awaiting implementation
+6. **design_primers_complete** - End-to-end pipeline:
+   - Orchestrates entire workflow automatically
+   - Region discovery → specificity → ranking → Primer3 → QC
+   - Returns only validated, high-quality primers
+   - Recommended for automated workflows
+
+**Dependencies:** primer3, ViennaRNA, BioPython, primer3-py
 
 ### 💬 Interactive Chat Interface
 
@@ -592,9 +599,10 @@ OPENAI_API_KEY=sk-...          # OpenAI API key for GPT-4
 ```bash
 NCBI_API_KEY=your-ncbi-key                    # Increases NCBI rate limits
 LOG_LEVEL=INFO                                # DEBUG, INFO, WARNING, ERROR
-MCP_DATABASE_SERVER=ndiag-database-server     # Database server container
+MCP_DATABASE_SERVER=ndiag-database-server     # Database server container (Phase 1)
 MCP_PROCESSING_SERVER=ndiag-processing-server # Processing server container (Phase 2)
 MCP_ALIGNMENT_SERVER=ndiag-alignment-server   # Alignment server container (Phase 3)
+MCP_DESIGN_SERVER=ndiag-design-server         # Design server container (Phase 4)
 ```
 
 **Getting API Keys:**
@@ -652,10 +660,10 @@ See **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** for complete deployment guide.
 
 | Phase | Server | Status | Tools |
 |-------|--------|--------|-------|
-| **Phase 1** | Database | ✅ Complete | get_sequences, get_taxonomy, get_neighbors, extract_sequence_columns, search_sra_studies |
-| **Phase 2** | Processing | ✅ Complete | fasta_qc, dereplicate_sequences, mask_low_complexity, detect_chimeras, process_sequences |
-| **Phase 3** | Alignment | ✅ Complete | align_sequences, process_alignment, build_phylogeny, calculate_distances, align_and_analyze |
-| **Phase 4** | Design | 🚧 Planned | find_signature_regions, design_primers, validate_primers |
+| **Phase 1** | Database | ✅ Complete | get_sequences, get_taxonomy, get_neighbors, extract_sequence_columns, search_sra_studies (5 tools) |
+| **Phase 2** | Processing | ✅ Complete | fasta_qc, dereplicate_sequences, mask_low_complexity, detect_chimeras, process_sequences (5 tools) |
+| **Phase 3** | Alignment | ✅ Complete | align_sequences, process_alignment, build_phylogeny, calculate_distances, align_and_analyze (5 tools) |
+| **Phase 4** | Design | ✅ Complete | find_signature_regions, analyze_specificity, rank_regions, primer3_design, oligo_qc, design_primers_complete (6 tools) |
 | **Phase 5** | Validation | 🚧 Planned | blast_primers, insilico_pcr, search_literature |
 | **Phase 6** | Export | 🚧 Planned | export_results, generate_report, track_provenance |
 
@@ -716,11 +724,11 @@ mdk_mcp/
 
 Contributions are welcome! Areas needing help:
 
-### Phase 3-6 Implementation
-- Alignment server (MAFFT/MUSCLE/Clustal Omega integration, phylogenetics)
-- Design server (signature region discovery, Primer3)
-- Validation server (BLAST, in-silico PCR)
-- Export server (report generation)
+### Phase 5-6 Implementation
+- ✅ ~~Alignment server~~ (COMPLETE - MAFFT/MUSCLE/Clustal Omega, phylogenetics)
+- ✅ ~~Design server~~ (COMPLETE - signature regions, Primer3, oligo QC)
+- Validation server (BLAST, in-silico PCR, literature search)
+- Export server (report generation, provenance tracking)
 
 ### Infrastructure
 - Sequence caching layer (Redis)

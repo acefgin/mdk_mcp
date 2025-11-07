@@ -79,14 +79,27 @@ services:
       timeout: 10s
       retries: 3
 
-  # Phase 4: Design MCP Server (when implemented)
-  # design-server:
-  #   build: ./mcp_servers/design_server
-  #   container_name: ndiag-design-server
-  #   stdin_open: true
-  #   networks:
-  #     - ndiag-network
-  #   restart: unless-stopped
+  # Phase 4: Design MCP Server
+  design-server:
+    build: ./mcp_servers/design_server
+    container_name: ndiag-design-server
+    stdin_open: true
+    tty: false
+    networks:
+      - ndiag-network
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - TEMP_DIR=/tmp/mcp_cache
+      - RESULTS_DIR=/results
+    volumes:
+      - design_cache:/tmp/mcp_cache
+      - ./results:/results  # Shared results (entrypoint fixes permissions)
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ps", "aux", "|", "grep", "design_mcp_server"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # ========================================
   # AutoGen Application
@@ -99,6 +112,7 @@ services:
       - database-server
       - processing-server
       - alignment-server
+      - design-server
     networks:
       - ndiag-network
     env_file:
@@ -107,6 +121,7 @@ services:
       - MCP_DATABASE_SERVER=ndiag-database-server
       - MCP_PROCESSING_SERVER=ndiag-processing-server
       - MCP_ALIGNMENT_SERVER=ndiag-alignment-server
+      - MCP_DESIGN_SERVER=ndiag-design-server
       - AUTOGEN_MAX_ROUNDS=50
       - RESULTS_DIR=/results
     volumes:
@@ -145,6 +160,8 @@ volumes:
   processing_cache:
     driver: local
   alignment_cache:
+    driver: local
+  design_cache:
     driver: local
   results:
     driver: local

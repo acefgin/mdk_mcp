@@ -1,0 +1,6 @@
+mcp>=0.9.0
+biopython>=1.81
+primer3-py>=1.1.0
+numpy>=1.24.0
+pandas>=2.0.0
+scipy>=1.10.0

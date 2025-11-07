@@ -1103,6 +1103,13 @@ class AutoGenMCPFunctionExecutor:
             "build_phylogeny": ("alignment", "build_phylogeny"),
             "calculate_distances": ("alignment", "calculate_distances"),
             "align_and_analyze": ("alignment", "align_and_analyze"),
+            # Design tools
+            "find_signature_regions": ("design", "find_signature_regions"),
+            "analyze_specificity": ("design", "analyze_specificity"),
+            "rank_regions": ("design", "rank_regions"),
+            "primer3_design": ("design", "primer3_design"),
+            "oligo_qc": ("design", "oligo_qc"),
+            "design_primers_complete": ("design", "design_primers_complete"),
         }
 
         if function_name not in function_map:
@@ -1181,6 +1188,13 @@ class AutoGenMCPFunctionExecutor:
             "build_phylogeny": ("alignment", "build_phylogeny"),
             "calculate_distances": ("alignment", "calculate_distances"),
             "align_and_analyze": ("alignment", "align_and_analyze"),
+            # Design tools
+            "find_signature_regions": ("design", "find_signature_regions"),
+            "analyze_specificity": ("design", "analyze_specificity"),
+            "rank_regions": ("design", "rank_regions"),
+            "primer3_design": ("design", "primer3_design"),
+            "oligo_qc": ("design", "oligo_qc"),
+            "design_primers_complete": ("design", "design_primers_complete"),
         }
 
         if function_name not in function_map:
