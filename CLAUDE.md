@@ -15,17 +15,20 @@ This is **mdk_mcp** (Neglected Diagnostics MCP), an MCP-based system for biologi
 - **Database Server** (`mcp_servers/database_server/`) ✅ **COMPLETED**: Unified access to NCBI, BOLD, SILVA, UNITE, and SRA databases via gget and BioPython
 - **Processing Server** (`mcp_servers/processing_server/`) ✅ **COMPLETED**: Quality control, deduplication, masking, chimera detection via seqkit and vsearch
 - **Alignment Server** (`mcp_servers/alignment_server/`) ✅ **COMPLETED**: Multiple sequence alignment (MAFFT, MUSCLE, Clustal Omega), phylogenetic analysis, and CIAlign-based quality processing
-- **Design Server** (not yet implemented): Signature region discovery + Primer3 primer design + CIAlign consensus
-- **Validation Server** (not yet implemented): BLAST validation + in-silico PCR + literature search
+- **Design Server** (`mcp_servers/design_server/`) ✅ **COMPLETED**: Signature region discovery, specificity analysis, Primer3 primer design, and oligonucleotide quality control
+- **Validation Server** (`mcp_servers/validation_server/`) ✅ **COMPLETED**: BLAST validation (remote via gget + local via NCBI BLAST+), in-silico PCR, coverage assessment, and PubMed literature search
 - **Export Server** (not yet implemented): Results export + provenance tracking
 
-**Current Status (as of October 31, 2025)**:
+**Current Status (as of November 7, 2025)**:
 - **Phase 1 Complete**: Database Integration MCP server (11 tools)
 - **Phase 2 Complete**: Processing MCP server (5 tools)
 - **Phase 3 Complete**: Alignment MCP server (5 tools)
-- **AG2 Integration Complete**: Multi-agent system with MCP bridge functional, all 3 phases integrated
+- **Phase 4 Complete**: Design & Primers MCP server (6 tools)
+- **Phase 5 Complete**: Validation & Literature MCP server (7 tools)
+- **AG2 Integration Complete**: Multi-agent system with MCP bridge functional, all 5 phases integrated, includes ValidationAgent
+- **Total: 34 MCP tools** operational across 5 containerized servers
 - **Testing Infrastructure**: Comprehensive MCP Inspector testing guides and automation
-- **Ready for Phase 4**: System ready to begin Design & Primers Server implementation
+- **Ready for Phase 6**: System ready to begin Export & Provenance Server implementation
 
 ## Key Technologies
 
@@ -40,6 +43,10 @@ This is **mdk_mcp** (Neglected Diagnostics MCP), an MCP-based system for biologi
 - **MUSCLE v5**: High-throughput sequence alignment
 - **Clustal Omega**: General-purpose multiple sequence alignment
 - **CIAlign**: Alignment cleaning and quality assessment
+- **Primer3**: Primer design engine for qPCR primers
+- **ViennaRNA**: RNA/DNA secondary structure prediction (hairpins, dimers)
+- **NCBI BLAST+**: Local and remote BLAST for specificity validation (blastn, blastp, blastx, tblastn, tblastx)
+- **gget BLAST/BLAT**: Remote BLAST and BLAT searches via gget for primer validation
 - **Docker**: Containerized MCP servers with isolated dependencies
 - **Kubernetes**: Production orchestration and auto-scaling
 
@@ -204,6 +211,10 @@ cd mcp_servers/alignment_server
 npx @modelcontextprotocol/inspector python3 alignment_mcp_server.py
 # Open http://localhost:6274
 
+cd mcp_servers/design_server
+npx @modelcontextprotocol/inspector python3 design_mcp_server.py
+# Open http://localhost:6274
+
 # CLI testing
 npx @modelcontextprotocol/inspector \
   --method tools/list \
@@ -217,6 +228,9 @@ cd mcp_servers/processing_server
 python -m pytest tests/ -v
 
 cd mcp_servers/alignment_server
+python -m pytest tests/ -v
+
+cd mcp_servers/design_server
 python -m pytest tests/ -v
 
 # See comprehensive guide
@@ -358,10 +372,29 @@ The project follows a 6-phase roadmap (see `road_map.md`):
   - BioPython for distance calculations (p-distance, Jukes-Cantor, Kimura)
   - Docker containerization with MAFFT v7.505 + MUSCLE v5.1 + Clustal Omega
   - Full AG2 integration with AnalystAgent
-- **Phase 4: Design & Primers** 🔜 **NEXT** (7-9 weeks estimated)
-  - Will include: Signature region discovery, Primer3, CIAlign for consensus generation
-- Phase 5: Validation & Literature (4-5 weeks)
-- Phase 6: Export & Provenance (1-2 weeks)
+- **Phase 4: Design & Primers** ✅ **COMPLETED** (1 session actual - ahead of 7-9 week estimate!)
+  - 6 MCP tools implemented: find_signature_regions, analyze_specificity, rank_regions, primer3_design, oligo_qc, design_primers_complete
+  - Signature region discovery with sliding window analysis and conservation/divergence scoring
+  - Multi-criteria ranking (conservation, specificity, complexity)
+  - Full Primer3 integration with configurable constraints
+  - Oligonucleotide QC with Tm, secondary structures (hairpins, dimers), GC content analysis
+  - ViennaRNA integration for secondary structure prediction
+  - Docker containerization with Primer3 + ViennaRNA v2.6.4
+  - End-to-end automated pipeline from alignment to validated primers
+  - Full AG2 integration with PrimerDesignAgent
+- **Phase 5: Validation & Literature** ✅ **COMPLETED** (1 session actual - ahead of 4-5 week estimate!)
+  - 7 MCP tools implemented: gget_blast, gget_blat, blast_nt, in_silico_pcr, assess_coverage, search_pubmed, validate_primers_complete
+  - Remote BLAST via gget (NCBI/Ensembl databases) for specificity checking
+  - Local BLAST support following NCBI best practices (BLASTDB structure, volume mounting)
+  - BLAT integration for short exact matches
+  - In-silico PCR simulation with mismatch tolerance and amplicon prediction
+  - Coverage assessment (sensitivity/specificity calculations)
+  - PubMed/Entrez integration for literature validation
+  - Docker containerization with NCBI BLAST+ 2.12.0+
+  - Complete validation pipeline combining all checks
+  - Full AG2 integration with ValidationAgent
+- **Phase 6: Export & Provenance** 🔜 **NEXT** (1-2 weeks estimated)
+  - Will include: Results export, provenance tracking, workflow documentation
 
 ## Dependencies and Versions
 
@@ -370,8 +403,11 @@ The project follows a 6-phase roadmap (see `road_map.md`):
 - gget ≥0.28.0
 - BioPython ≥1.81
 - pysradb ≥1.4.0
+- primer3-py ≥1.1.0
+- numpy ≥1.24.0
+- pandas ≥2.0.0
 
-See `mcp_servers/database_server/requirements.txt` for full dependency list.
+See individual server `requirements.txt` files for complete dependency lists.
 
 ## AG2 Integration
 
@@ -411,7 +447,7 @@ sequences = await bridge.call_tool("database", "get_sequences", {
 - Cloud SQL (BigQuery/Athena) requires additional credentials setup
 - Rate limiting is basic (no distributed rate limiting across instances)
 - No caching layer implemented yet (planned for future)
-- **Phases 4-6 MCP servers not yet implemented** (Phases 1-3 complete: Database + Processing + Alignment)
+- **Phase 6 MCP server not yet implemented** (Phases 1-5 complete: Database + Processing + Alignment + Design + Validation)
 
 ## What's Been Accomplished
 
@@ -449,12 +485,51 @@ sequences = await bridge.call_tool("database", "get_sequences", {
 - ✅ Complete implementation documentation (README, IMPLEMENTATION_SUMMARY)
 - ✅ Full AG2 integration with AnalystAgent (10 tools: 5 processing + 5 alignment)
 
+### Phase 4: Design Server
+- ✅ 6 fully functional MCP tools for primer design and signature region discovery
+- ✅ Signature region discovery with sliding window analysis (conservation/divergence scoring)
+- ✅ Specificity analysis for target vs off-target discrimination
+- ✅ Multi-criteria ranking system (conservation, specificity, complexity)
+- ✅ Full Primer3 integration with configurable constraints (size, Tm, GC content, product size)
+- ✅ Oligonucleotide QC with Tm calculation, secondary structure analysis (hairpins, dimers)
+- ✅ ViennaRNA v2.6.4 integration for secondary structure prediction
+- ✅ End-to-end automated pipeline (`design_primers_complete`) from alignment to validated primers
+- ✅ Docker containerization with Primer3 + ViennaRNA
+- ✅ Test coverage with pytest (9 test classes, 324 lines)
+- ✅ Complete implementation documentation (README, 412 lines)
+- ✅ Full AG2 integration with PrimerDesignAgent
+
+### Phase 5: Validation Server
+- ✅ 7 fully functional MCP tools for primer validation and literature search
+- ✅ Remote BLAST via gget (gget_blast, gget_blat) for NCBI/Ensembl database searches
+- ✅ Local BLAST support (blast_nt) following NCBI best practices (BLASTDB structure, volume mounting)
+- ✅ In-silico PCR simulation (in_silico_pcr) with mismatch tolerance and amplicon prediction
+- ✅ Coverage assessment (assess_coverage) with sensitivity/specificity calculations
+- ✅ PubMed integration (search_pubmed) via BioPython Entrez for literature validation
+- ✅ Complete validation pipeline (validate_primers_complete) combining all checks
+- ✅ NCBI BLAST+ 2.12.0+ integration with proper rate limiting (3 req/sec, 10/sec with API key)
+- ✅ Docker containerization with NCBI BLAST+ following official best practices
+- ✅ Test coverage with pytest (411 lines of unit tests)
+- ✅ Comprehensive documentation (README, 658 lines) with BLAST database setup guide
+- ✅ Full AG2 integration with ValidationAgent
+- ✅ **Enhanced ValidationAgent system prompt** (314 lines, ~95% complete, Nov 7 2025):
+  - BLAST interpretation guidelines with quantitative thresholds (E-values, identity %, alignment length)
+  - Literature search strategy with 4-step query construction and fallback handling
+  - Error handling & recovery strategies for 5 common failure scenarios (0 BLAST hits, PubMed timeout, PCR fails, low sensitivity, tool errors)
+  - Tool parameter selection guide for all 4 validation tools (gget_blast, search_pubmed, in_silico_pcr, assess_coverage)
+  - Scientific rationale for validation criteria (why ≥95% sensitivity, ≥98% specificity, 3' end mismatches, amplicon size)
+  - 6 worked examples showing correct BLAST interpretation, literature search, and error recovery
+  - Context-aware validation (clinical vs research vs conservation applications)
+  - Robust autonomous validation with minimal Coordinator intervention
+
 ### AG2 Integration
 - ✅ MCPClientBridge implemented (`autogen_app/autogen_mcp_bridge.py`)
 - ✅ Multi-agent qPCR assistant system (`autogen_app/qpcr_assistant.py`)
-- ✅ Docker Compose deployment for integrated AG2+MCP system
+- ✅ 5 specialized agents with **34 total MCP tools** (11 database + 5 processing + 5 alignment + 6 design + 7 validation)
+- ✅ ValidationAgent with comprehensive primer validation workflow
+- ✅ Docker Compose deployment for integrated AG2+MCP system (5 MCP servers)
 - ✅ Interactive chat interface for natural language primer design requests
-- ✅ Tested and functional end-to-end workflow
+- ✅ Tested and functional end-to-end workflow from sequence retrieval to validated primers
 - ✅ Sequence organization with automatic file management and README generation
 
 ### Testing Infrastructure
@@ -490,14 +565,14 @@ sequences = await bridge.call_tool("database", "get_sequences", {
 
 **Infrastructure Coverage**: 100% across all development areas (MCP, AG2, BioPython, primer design, CLI tools, Docker, testing)
 
-## What's Next (Phase 4)
+## What's Next (Phase 6)
 
-The Design Server is the next priority, which will add:
-- Signature region discovery and identification
-- Primer3 integration for qPCR primer design
-- CIAlign for consensus sequence generation
-- Specificity analysis for designed primers
-- Multi-criteria primer evaluation (Tm, GC content, secondary structures)
-- Unified `design_primers` pipeline tool
+The Export & Provenance Server is the next priority, which will add:
+- Results export in multiple formats (JSON, CSV, Excel, PDF reports)
+- Provenance tracking for reproducibility
+- Workflow documentation and metadata capture
+- Integration with existing lab information systems (LIMS)
+- Automated report generation with primer validation summaries
+- Export of complete assay specifications for publication
 
-See `road_map.md` Phase 4 for detailed specifications.
+See `road_map.md` Phase 6 for detailed specifications.
