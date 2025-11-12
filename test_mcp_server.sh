@@ -62,6 +62,15 @@ esac
 
 cd "$SERVER_DIR" || exit 1
 
+# Load environment variables from autogen_app/.env if it exists
+ENV_FILE="../../autogen_app/.env"
+if [ -f "$ENV_FILE" ]; then
+    echo "Loading environment variables from autogen_app/.env..."
+    set -a  # automatically export all variables
+    source "$ENV_FILE"
+    set +a
+fi
+
 # Kill any existing Inspector processes
 echo "Cleaning up old Inspector processes..."
 pkill -f "@modelcontextprotocol/inspector" 2>/dev/null || true
