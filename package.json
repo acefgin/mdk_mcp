@@ -7,21 +7,20 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "test": "vitest",
-    "test:ui": "vitest --ui",
-    "test:coverage": "vitest --coverage",
-    "test:run": "vitest run",
-    "test:unit": "vitest run tests/unit",
-    "test:integration": "vitest run tests/integration",
-    "generate-tools": "tsx examples/generate-database-tools.ts",
-    "demo:client": "tsx examples/mcp-client-demo.ts",
-    "demo:pii": "tsx examples/pii-tokenization-demo.ts",
-    "demo:skills": "tsx examples/skills-manager-demo.ts",
-    "demo:executor": "tsx examples/executor-demo.ts",
-    "benchmark": "tsx examples/token-benchmark.ts",
-    "lint": "eslint . --ext .ts",
-    "format": "prettier --write \"**/*.{ts,md,json}\"",
-    "typecheck": "tsc --noEmit"
+    "build": "npm run generate-tools:all && npm run build:lib && npm run build:servers && npm run build:mcp-server",
+    "generate-tools:all": "tsx examples/generate-all-tools.ts",
+    "build:lib": "tsc workspace/lib/mcp-client.ts --outDir workspace/lib --module ES2022 --target ES2022 --moduleResolution node --esModuleInterop --skipLibCheck --declaration",
+    "build:servers": "cd workspace && tsc servers/**/*.ts --outDir . --module ES2022 --target ES2022 --moduleResolution node --esModuleInterop --skipLibCheck && cd ..",
+    "build:mcp-server": "tsc workspace/mcp-server.ts --outDir workspace --module ES2022 --target ES2022 --moduleResolution node --esModuleInterop --skipLibCheck",
+    "start": "node workspace/mcp-server.js",
+    "start:debug": "DEBUG=true node workspace/mcp-server.js",
+    "docker:up": "docker-compose -f docker-compose.autogen.yml up -d",
+    "docker:down": "docker-compose -f docker-compose.autogen.yml down",
+    "docker:logs": "docker-compose -f docker-compose.autogen.yml logs -f",
+    "docker:status": "docker ps --filter 'name=ndiag'",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "keywords": [
     "bioinformatics",
@@ -37,15 +36,14 @@
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@types/node": "^20.10.0",
-    "@vitest/coverage-v8": "^1.0.0",
-    "@vitest/ui": "^1.0.0",
-    "eslint": "^8.55.0",
     "@typescript-eslint/eslint-plugin": "^6.15.0",
     "@typescript-eslint/parser": "^6.15.0",
+    "@vitest/coverage-v8": "^1.0.0",
+    "@vitest/ui": "^1.6.1",
+    "eslint": "^8.55.0",
     "prettier": "^3.1.1",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3",
-    "vitest": "^1.0.4"
-  },
-  "dependencies": {}
+    "vitest": "^1.6.1"
+  }
 }

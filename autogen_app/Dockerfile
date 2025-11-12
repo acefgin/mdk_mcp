@@ -13,10 +13,9 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY autogen_mcp_bridge.py .
-COPY text_resources.py .
-COPY qpcr_assistant.py .
+# Copy application code (lib directory and main entry point)
+COPY lib/ ./lib/
+COPY main.py .
 COPY OAI_CONFIG_LIST.json .
 
 # Create results directory
@@ -30,4 +29,4 @@ ENV PYTHONUNBUFFERED=1
 ENV MCP_DATABASE_SERVER=ndiag-database-server
 
 # Default command (can be overridden)
-CMD ["python", "qpcr_assistant.py"]
+CMD ["python", "main.py"]

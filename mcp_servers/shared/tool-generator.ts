@@ -7,8 +7,9 @@
  * @see MIGRATION_PLAN.md Phase 1.1
  */
 
-import { writeFile, mkdir } from "fs/promises";
-import { join } from "path";
+import { writeFile, mkdir, copyFile } from "fs/promises";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 
 /**
  * Tool definition from Python MCP server
@@ -44,6 +45,35 @@ export interface GeneratorConfig {
  */
 export class ToolFileGenerator {
   /**
+   * Copy base infrastructure files to workspace
+   * 
+   * Copies mcp-client.ts and mcp-server.ts from mcp_servers/shared/ to workspace/
+   * 
+   * @param outputDir - Output directory (e.g., './workspace')
+   */
+  async copyBaseFiles(outputDir: string): Promise<void> {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = dirname(__filename);
+    const sharedDir = __dirname;
+
+    // Create lib directory
+    const libDir = join(outputDir, "lib");
+    await mkdir(libDir, { recursive: true });
+
+    // Copy mcp-client.ts
+    const mcpClientSrc = join(sharedDir, "mcp-client.ts");
+    const mcpClientDest = join(libDir, "mcp-client.ts");
+    await copyFile(mcpClientSrc, mcpClientDest);
+    console.log(`  ✓ Copied mcp-client.ts to ${libDir}/`);
+
+    // Copy mcp-server.ts
+    const mcpServerSrc = join(sharedDir, "mcp-server.ts");
+    const mcpServerDest = join(outputDir, "mcp-server.ts");
+    await copyFile(mcpServerSrc, mcpServerDest);
+    console.log(`  ✓ Copied mcp-server.ts to ${outputDir}/`);
+  }
+
+  /**
    * Generate all tool files for a server
    *
    * Creates:
@@ -72,7 +102,7 @@ export class ToolFileGenerator {
     for (const tool of tools) {
       try {
         const toolFile = this.generateToolFile(tool, serverName);
-        const fileName = this.camelToKebab(tool.name) + ".ts";
+        const fileName = tool.name + ".ts";
         const filePath = join(serverDir, fileName);
 
         await writeFile(filePath, toolFile);
@@ -153,9 +183,21 @@ ${outputInterface}
 export async function ${functionName}(
   input: ${typeName}Input
 ): Promise<${returnType}> {
+  // Sanitize input: convert string numbers to actual numbers
+  const sanitized: any = { ...input };
+  for (const [key, value] of Object.entries(sanitized)) {
+    // Convert string numbers to numbers (e.g., "10" -> 10)
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (trimmed !== '' && !isNaN(Number(trimmed))) {
+        sanitized[key] = Number(trimmed);
+      }
+    }
+  }
+  
   return callMCPTool<${returnType}>(
     '${serverName}__${tool.name}',
-    input
+    sanitized
   );
 }
 `;
@@ -170,7 +212,7 @@ export async function ${functionName}(
   private generateIndexFile(tools: ToolDefinition[]): string {
     const exports = tools
       .map((t) => {
-        const fileName = this.camelToKebab(t.name);
+        const fileName = t.name;
         const functionName = this.snakeToCamel(t.name);
         return `export { ${functionName} } from './${fileName}.js';`;
       })
@@ -215,7 +257,7 @@ ${exports}
       })
       .join("\n");
 
-    const exampleTool = tools[0];
+    const exampleTool = tools[0] || { name: 'example_tool', description: 'Example tool' };
     const exampleFunctionName = this.snakeToCamel(exampleTool.name);
 
     return `# ${this.capitalize(serverName)} Server

@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "mdk-ts-mcp": {
+      "command": "wsl",
+      "args": [
+        "-e",
+        "bash",
+        "-c",
+        "cd /home/cxl/MDK_Design/mdk_mcp && node workspace/mcp-server.js"
+      ],
+      "env": {
+        "DEBUG": "false"
+      }
+    }
+  }
+}
+
+

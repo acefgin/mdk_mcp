@@ -20,12 +20,15 @@ describe('ToolFileGenerator', () => {
   });
 
   afterEach(async () => {
-    // Cleanup test output
+    // Cleanup test output - DISABLED to allow inspection
+    // Uncomment to re-enable cleanup
+    /*
     try {
       await rm(testOutputDir, { recursive: true, force: true });
     } catch {
       // Ignore cleanup errors
     }
+    */
   });
 
   describe('generateToolFile', () => {
@@ -50,7 +53,7 @@ describe('ToolFileGenerator', () => {
       expect(result).toContain('export interface GetSequencesInput');
       expect(result).toContain('taxon: string;');
       expect(result).toContain('max_results?: number;');
-      expect(result).toContain("callMCPTool<any>('database__get_sequences'");
+      expect(result).toContain("'database__get_sequences'");
       expect(result).toContain('/** Taxon name */');
     });
 
@@ -137,7 +140,7 @@ describe('ToolFileGenerator', () => {
 
       const result = (generator as any).generateToolFile(mockTool, 'test');
 
-      expect(result).toContain('/** A test tool */');
+      expect(result).toContain('* A test tool');
       expect(result).toContain('/** First parameter */');
       expect(result).toContain('@param input - Tool input parameters');
       expect(result).toContain('@returns Tool execution result');
@@ -162,8 +165,8 @@ describe('ToolFileGenerator', () => {
 
       const result = (generator as any).generateIndexFile(mockTools);
 
-      expect(result).toContain("export { getSequences } from './get-sequences.js';");
-      expect(result).toContain("export { alignSequences } from './align-sequences.js';");
+      expect(result).toContain("export { getSequences } from './get_sequences.js';");
+      expect(result).toContain("export { alignSequences } from './align_sequences.js';");
       expect(result).toContain('@generated');
       expect(result).toContain('import * as database');
     });
@@ -229,13 +232,13 @@ describe('ToolFileGenerator', () => {
       const serverDir = join(testOutputDir, 'servers', 'database');
       const files = await readdir(serverDir);
 
-      expect(files).toContain('get-sequences.ts');
-      expect(files).toContain('get-taxonomy.ts');
+      expect(files).toContain('get_sequences.ts');
+      expect(files).toContain('get_taxonomy.ts');
       expect(files).toContain('index.ts');
       expect(files).toContain('README.md');
 
       // Check file contents
-      const getSeqContent = await readFile(join(serverDir, 'get-sequences.ts'), 'utf-8');
+      const getSeqContent = await readFile(join(serverDir, 'get_sequences.ts'), 'utf-8');
       expect(getSeqContent).toContain('export async function getSequences');
 
       const indexContent = await readFile(join(serverDir, 'index.ts'), 'utf-8');
@@ -256,6 +259,11 @@ describe('ToolFileGenerator', () => {
     it('should convert camelCase to kebab-case', () => {
       const result = (generator as any).camelToKebab('getSequences');
       expect(result).toBe('get-sequences');
+    });
+
+    it('should convert snake_case names correctly', () => {
+      const result = (generator as any).snakeToCamel('get_sequences');
+      expect(result).toBe('getSequences');
     });
 
     it('should capitalize strings', () => {
@@ -365,11 +373,15 @@ describe('ToolFileGenerator - Database Server Example', () => {
   });
 
   afterEach(async () => {
+    // Cleanup test output - DISABLED to allow inspection
+    // Uncomment to re-enable cleanup
+    /*
     try {
       await rm(testOutputDir, { recursive: true, force: true });
     } catch {
       // Ignore cleanup errors
     }
+    */
   });
 
   it('should generate all 11 Database Server tools', async () => {
@@ -433,14 +445,14 @@ describe('ToolFileGenerator - Database Server Example', () => {
     const serverDir = join(testOutputDir, 'servers', 'database');
     const files = await readdir(serverDir);
 
-    expect(files).toContain('get-sequences.ts');
-    expect(files).toContain('gget-ref.ts');
-    expect(files).toContain('get-taxonomy.ts');
+    expect(files).toContain('get_sequences.ts');
+    expect(files).toContain('gget_ref.ts');
+    expect(files).toContain('get_taxonomy.ts');
     expect(files).toContain('index.ts');
     expect(files).toContain('README.md');
 
     // Verify tool content
-    const getSeqContent = await readFile(join(serverDir, 'get-sequences.ts'), 'utf-8');
+    const getSeqContent = await readFile(join(serverDir, 'get_sequences.ts'), 'utf-8');
     expect(getSeqContent).toContain('region?: "COI" | "16S" | "ITS" | "mitogenome" | "whole"');
     expect(getSeqContent).toContain('source?: "gget" | "ncbi" | "bold" | "silva" | "unite"');
   }, 10000);

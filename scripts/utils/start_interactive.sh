@@ -84,7 +84,7 @@ if docker ps | grep -q "qpcr-assistant"; then
             docker exec -it qpcr-assistant bash -c "
 stty sane 2>/dev/null || true
 export TERM=xterm-256color
-cd /app && python3 -c 'from qpcr_assistant import interactive_mode; interactive_mode()'
+cd /app && python3 -c 'from main import interactive_mode; interactive_mode()'
 "
             exit 0
             ;;
@@ -100,7 +100,7 @@ cd /app && python3 -c 'from qpcr_assistant import interactive_mode; interactive_
         3)
             echo ""
             echo "Exiting. Container is still running."
-            echo "To connect later: ./start_interactive.sh"
+            echo "To connect later: ./scripts/utils/start_interactive.sh"
             echo "To stop: docker compose -f docker-compose.autogen.yml down"
             echo ""
             exit 0
@@ -197,7 +197,7 @@ stty sane 2>/dev/null || true
 export TERM=xterm-256color
 
 # Start interactive mode with Python
-cd /app && python3 -c 'from qpcr_assistant import interactive_mode; interactive_mode()'
+cd /app && python3 -c 'from main import interactive_mode; interactive_mode()'
 "
 
 # If user detaches or exits
@@ -207,7 +207,7 @@ echo ""
 echo "Session ended."
 echo ""
 echo "📋 Available Commands:"
-echo "   Reconnect:    ./start_interactive.sh"
+echo "   Reconnect:    ./scripts/utils/start_interactive.sh"
 echo "   Stop all:     docker compose -f docker-compose.autogen.yml down"
 echo "   View logs:    docker logs qpcr-assistant"
 echo "   Enter shell:  docker exec -it qpcr-assistant bash"

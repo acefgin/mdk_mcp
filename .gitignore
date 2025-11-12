@@ -12,3 +12,15 @@ mcp_servers/database_server/__pycache__/
 .mcp.json.backup
 node_modules/
 workspace/
+logs/
+tmp/
+
+# Test output directories
+test-output/
+test-output-*/
+test-migration-output/
+
+# Test output directories (for inspection)
+test-output/
+test-output-*/
+test-migration-output/

@@ -19,13 +19,13 @@ import autogen
 from autogen import ConversableAgent, AssistantAgent, UserProxyAgent, GroupChat, GroupChatManager
 from autogen.cache import Cache
 
-from autogen_mcp_bridge import (
+from lib.mcp_bridge import (
     MCPClientBridge,
     create_autogen_functions,
     AutoGenMCPFunctionExecutor,
     summarize_large_result
 )
-from text_resources import (
+from lib.resources import (
     COORDINATOR_SYSTEM_MESSAGE,
     DATABASE_AGENT_SYSTEM_MESSAGE,
     ANALYST_SYSTEM_MESSAGE,
