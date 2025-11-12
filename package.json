@@ -1,0 +1,51 @@
+{
+  "name": "mdk_mcp",
+  "version": "2.0.0",
+  "description": "MDK Neglected Diagnostics MCP - Bioinformatics tools with code execution architecture",
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest --coverage",
+    "test:run": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "generate-tools": "tsx examples/generate-database-tools.ts",
+    "demo:client": "tsx examples/mcp-client-demo.ts",
+    "demo:pii": "tsx examples/pii-tokenization-demo.ts",
+    "demo:skills": "tsx examples/skills-manager-demo.ts",
+    "demo:executor": "tsx examples/executor-demo.ts",
+    "benchmark": "tsx examples/token-benchmark.ts",
+    "lint": "eslint . --ext .ts",
+    "format": "prettier --write \"**/*.{ts,md,json}\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "bioinformatics",
+    "mcp",
+    "model-context-protocol",
+    "primer-design",
+    "qpcr",
+    "sequences",
+    "diagnostics"
+  ],
+  "author": "MDK Design Team",
+  "license": "MIT",
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@types/node": "^20.10.0",
+    "@vitest/coverage-v8": "^1.0.0",
+    "@vitest/ui": "^1.0.0",
+    "eslint": "^8.55.0",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "prettier": "^3.1.1",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.0.4"
+  },
+  "dependencies": {}
+}

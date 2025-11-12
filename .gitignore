@@ -10,3 +10,5 @@ mcp_servers/database_server/__pycache__/
 .mcp.json
 .mcp.local.json
 .mcp.json.backup
+node_modules/
+workspace/
