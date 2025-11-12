@@ -1,0 +1,50 @@
+services:
+  validation-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ndiag-validation-server:latest
+    container_name: ndiag-validation-server
+    stdin_open: true
+    tty: false
+    environment:
+      - MCP_SERVER_HOST=0.0.0.0
+      - MCP_SERVER_PORT=8004
+      - NCBI_API_KEY=${NCBI_API_KEY}
+      - NCBI_EMAIL=${NCBI_EMAIL:-user@example.com}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - TEMP_DIR=/tmp/mcp_validation
+      - BLAST_CACHE_DIR=/tmp/mcp_validation/blast_cache
+      - BLASTDB=/blastdb
+      - BLASTDB_CUSTOM=/blastdb_custom
+    volumes:
+      # Results directory (read-write)
+      - ./results:/results/validation:rw
+      # BLAST cache (read-write)
+      - blast_cache:/tmp/mcp_validation/blast_cache:rw
+      # Optional: Mount local BLAST databases (read-only)
+      # Uncomment and set path to your BLAST databases:
+      # - /path/to/your/blastdb:/blastdb:ro
+      # Optional: Mount custom BLAST databases (read-write)
+      # - ./blastdb_custom:/blastdb_custom:rw
+      # Optional: Mount queries directory (read-only)
+      # - ./queries:/queries:ro
+      # Optional: Mount FASTA directory (read-only)
+      # - ./fasta:/fasta:ro
+    networks:
+      - mcp-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "blastn", "-version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  blast_cache:
+    driver: local
+
+networks:
+  mcp-network:
+    driver: bridge

@@ -30,6 +30,7 @@ from text_resources import (
     DATABASE_AGENT_SYSTEM_MESSAGE,
     ANALYST_SYSTEM_MESSAGE,
     PRIMER_DESIGN_AGENT_SYSTEM_MESSAGE,
+    VALIDATION_AGENT_SYSTEM_MESSAGE,
     README_TEMPLATE,
     BANNER_LINES,
     COMMANDS_TEXT,
@@ -671,9 +672,12 @@ class QPCRAssistant:
             "design": {
                 "container": os.getenv("MCP_DESIGN_SERVER", "ndiag-design-server"),
                 "command": ["python3", "/app/design_mcp_server.py"]
+            },
+            "validation": {
+                "container": os.getenv("MCP_VALIDATION_SERVER", "ndiag-validation-server"),
+                "command": ["python3", "/app/validation_mcp_server.py"]
             }
             # Add more servers as phases complete:
-            # "validation": {...},
             # "export": {...}
         }
 
@@ -1657,18 +1661,35 @@ The processed sequences are ready for alignment and phylogenetic analysis."""
         }
         
         primer_design_function_map = {
-            # Phase 4 tools will be added here (5 tools planned):
-            # "find_signature_regions": mcp_functions["find_signature_regions"],
-            # "design_primers": mcp_functions["design_primers"],
-            # "validate_primers": mcp_functions["validate_primers"],
-            # "insilico_pcr": mcp_functions["insilico_pcr"],
-            # "blast_primers": mcp_functions["blast_primers"],
+            # Phase 4 tools (6 tools):
+            "find_signature_regions": mcp_functions.get("find_signature_regions"),
+            "design_primers": mcp_functions.get("design_primers"),
+            "calculate_tm": mcp_functions.get("calculate_tm"),
+            "analyze_secondary_structure": mcp_functions.get("analyze_secondary_structure"),
+            "check_cross_reactivity": mcp_functions.get("check_cross_reactivity"),
+            "design_primers_complete": mcp_functions.get("design_primers_complete"),
         }
+        # Remove None values (tools not yet available)
+        primer_design_function_map = {k: v for k, v in primer_design_function_map.items() if v is not None}
+
+        validation_function_map = {
+            # Phase 5 tools (7 tools):
+            "gget_blast": mcp_functions.get("gget_blast"),
+            "gget_blat": mcp_functions.get("gget_blat"),
+            "blast_nt": mcp_functions.get("blast_nt"),
+            "in_silico_pcr": mcp_functions.get("in_silico_pcr"),
+            "assess_coverage": mcp_functions.get("assess_coverage"),
+            "search_pubmed": mcp_functions.get("search_pubmed"),
+            "validate_primers_complete": mcp_functions.get("validate_primers_complete"),
+        }
+        # Remove None values (tools not yet available)
+        validation_function_map = {k: v for k, v in validation_function_map.items() if v is not None}
 
         return {
             "database": database_function_map,
             "analyst": analyst_function_map,
             "primer_design": primer_design_function_map,
+            "validation": validation_function_map,
         }
 
     def _validate_agent_function_registration(
@@ -1800,6 +1821,31 @@ The processed sequences are ready for alignment and phylogenetic analysis."""
         
         return primer_agent
 
+    def _create_validation_agent(self, function_map: Dict[str, Callable]) -> AssistantAgent:
+        """
+        Create ValidationAgent with validation tools (Phase 5).
+
+        Args:
+            function_map: Dictionary of validation tool handlers (7 tools)
+
+        Returns:
+            Configured ValidationAgent
+        """
+        validation_agent = AssistantAgent(
+            name="ValidationAgent",
+            system_message=VALIDATION_AGENT_SYSTEM_MESSAGE,
+            llm_config=self.llm_config
+        )
+
+        # Register validation functions
+        if function_map:
+            validation_agent.register_function(function_map=function_map)
+            logger.info(f"ValidationAgent created with {len(function_map)} tools")
+        else:
+            logger.info("ValidationAgent created without tools (Phase 5 tools missing)")
+
+        return validation_agent
+
     def _create_user_proxy_agent(self, all_functions: Dict[str, Callable]) -> UserProxyAgent:
         """
         Create UserProxyAgent for termination and tool execution.
@@ -1861,12 +1907,13 @@ The processed sequences are ready for alignment and phylogenetic analysis."""
             function_maps: Dictionary of function maps for each agent
         """
         total_tools = sum(len(fm) for fm in function_maps.values())
-        
-        logger.info(f"✓ Created 4 specialized agents with {total_tools} total MCP tools:")
+
+        logger.info(f"✓ Created 5 specialized agents with {total_tools} total MCP tools:")
         logger.info(f"  • Coordinator: 0 tools (orchestration)")
         logger.info(f"  • DatabaseAgent: {len(function_maps['database'])} tools (data retrieval)")
         logger.info(f"  • AnalystAgent: {len(function_maps['analyst'])} tools (processing + alignment)")
-        logger.info(f"  • PrimerDesignAgent: {len(function_maps['primer_design'])} tools (Phase 4 pending)")
+        logger.info(f"  • PrimerDesignAgent: {len(function_maps['primer_design'])} tools (Phase 4)")
+        logger.info(f"  • ValidationAgent: {len(function_maps['validation'])} tools (Phase 5)")
 
     def _create_agents(self):
         """
@@ -1907,12 +1954,14 @@ The processed sequences are ready for alignment and phylogenetic analysis."""
         self.agents["database"] = self._create_database_agent(function_maps["database"])
         self.agents["analyst"] = self._create_analyst_agent(function_maps["analyst"])
         self.agents["primer_design"] = self._create_primer_design_agent(function_maps["primer_design"])
-        
+        self.agents["validation"] = self._create_validation_agent(function_maps["validation"])
+
         # Step 4: Create user proxy with all functions
         all_functions = {
             **function_maps["database"],
             **function_maps["analyst"],
-            **function_maps["primer_design"]
+            **function_maps["primer_design"],
+            **function_maps["validation"]
         }
         self.agents["user_proxy"] = self._create_user_proxy_agent(all_functions)
 
@@ -2284,7 +2333,7 @@ The processed sequences are ready for alignment and phylogenetic analysis."""
             intent = None
 
         # Validate next_agent
-        valid_agents = ["Coordinator", "DatabaseAgent", "AnalystAgent", "PrimerDesignAgent", "none"]
+        valid_agents = ["Coordinator", "DatabaseAgent", "AnalystAgent", "PrimerDesignAgent", "ValidationAgent", "none"]
         if next_agent and next_agent not in valid_agents:
             logger.warning(f"[INTENT] Invalid next_agent '{next_agent}' from {sender} - expected one of {valid_agents}")
             next_agent = None

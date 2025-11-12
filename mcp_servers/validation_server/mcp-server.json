@@ -1,0 +1,31 @@
+{
+  "name": "ndiag-validation-server",
+  "version": "0.1.0",
+  "description": "MCP server for primer validation and literature research. Provides BLAST, BLAT, in-silico PCR, coverage assessment, and PubMed search capabilities.",
+  "author": "mdk_mcp project",
+  "license": "MIT",
+  "repository": "https://github.com/yourusername/mdk_mcp",
+  "transport": "stdio",
+  "capabilities": {
+    "tools": true,
+    "resources": false,
+    "prompts": false
+  },
+  "tools": [
+    "gget_blast",
+    "gget_blat",
+    "blast_nt",
+    "in_silico_pcr",
+    "assess_coverage",
+    "search_pubmed",
+    "validate_primers_complete"
+  ],
+  "requirements": {
+    "python": ">=3.11",
+    "system": ["ncbi-blast+"]
+  },
+  "docker": {
+    "image": "ndiag-validation-server:latest",
+    "port": 8004
+  }
+}

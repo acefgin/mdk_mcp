@@ -101,6 +101,35 @@ services:
       timeout: 10s
       retries: 3
 
+  # Phase 5: Validation MCP Server
+  validation-server:
+    build: ./mcp_servers/validation_server
+    container_name: ndiag-validation-server
+    stdin_open: true
+    tty: false
+    networks:
+      - ndiag-network
+    environment:
+      - NCBI_API_KEY=${NCBI_API_KEY:-}
+      - NCBI_EMAIL=${NCBI_EMAIL:-user@example.com}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - TEMP_DIR=/tmp/mcp_validation
+      - BLAST_CACHE_DIR=/tmp/mcp_validation/blast_cache
+      - RESULTS_DIR=/results
+      - BLASTDB=/blastdb
+      - BLASTDB_CUSTOM=/blastdb_custom
+    volumes:
+      - validation_cache:/tmp/mcp_validation/blast_cache
+      - ./results:/results/validation  # Shared results (entrypoint fixes permissions)
+      # Optional: Mount local BLAST databases (read-only)
+      # - /path/to/your/blastdb:/blastdb:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "blastn", "-version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   # ========================================
   # AutoGen Application
   # ========================================
@@ -113,6 +142,7 @@ services:
       - processing-server
       - alignment-server
       - design-server
+      - validation-server
     networks:
       - ndiag-network
     env_file:
@@ -122,6 +152,7 @@ services:
       - MCP_PROCESSING_SERVER=ndiag-processing-server
       - MCP_ALIGNMENT_SERVER=ndiag-alignment-server
       - MCP_DESIGN_SERVER=ndiag-design-server
+      - MCP_VALIDATION_SERVER=ndiag-validation-server
       - AUTOGEN_MAX_ROUNDS=50
       - RESULTS_DIR=/results
     volumes:
@@ -162,6 +193,8 @@ volumes:
   alignment_cache:
     driver: local
   design_cache:
+    driver: local
+  validation_cache:
     driver: local
   results:
     driver: local
