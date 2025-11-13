@@ -149,7 +149,7 @@ All three Priority 1 critical components for token reduction have been successfu
 ## Documentation
 
 ### Comprehensive Guide
-- **File**: `docs/CODE_EXECUTION_GUIDE.md` (1,245 lines)
+- **File**: `docs/architecture/code_execution/GUIDE.md` (995 lines)
 - **Sections**:
   - Architecture overview
   - Code execution sandbox usage
@@ -161,7 +161,7 @@ All three Priority 1 critical components for token reduction have been successfu
   - Troubleshooting
 
 ### Quick Start Guide
-- **File**: `docs/CODE_EXECUTION_QUICKSTART.md` (180 lines)
+- **File**: `docs/architecture/code_execution/QUICKSTART.md` (274 lines)
 - **Content**: 5-minute setup, common use cases, troubleshooting
 
 ---
@@ -181,9 +181,10 @@ All three Priority 1 critical components for token reduction have been successfu
 | `workspace/lib/helpers.ts` | 573 | Context-efficient utilities |
 | `workspace/tests/mcp-client.test.ts` | 346 | MCP client tests |
 | `workspace/tests/helpers.test.ts` | 421 | Helper utilities tests |
-| `docs/CODE_EXECUTION_GUIDE.md` | 1,245 | Comprehensive guide |
-| `docs/CODE_EXECUTION_QUICKSTART.md` | 180 | Quick start guide |
-| **TOTAL** | **3,963** | **11 new files** |
+| `docs/architecture/code_execution/GUIDE.md` | 995 | Comprehensive guide |
+| `docs/architecture/code_execution/QUICKSTART.md` | 274 | Quick start guide |
+| `docs/architecture/code_execution/README.md` | NEW | Documentation index |
+| **TOTAL** | **3,963+** | **12 new files** |
 
 ### Modified Files
 

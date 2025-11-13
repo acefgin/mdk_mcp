@@ -21,7 +21,7 @@ import {
 import { VM } from 'vm2';
 import { promises as fs } from 'fs';
 import path from 'path';
-import * as helpers from '../../mcp_servers/shared/helpers.js';
+import * as helpers from '../../workspace/helpers.js';
 
 // Configuration from environment
 const EXECUTION_TIMEOUT = parseInt(process.env.EXECUTION_TIMEOUT || '30000', 10);
@@ -152,6 +152,15 @@ async function executeCode(
   const startTime = Date.now();
 
   try {
+    // Check for common mistakes
+    if (code.includes('await import(') || code.includes('import(')) {
+      return {
+        success: false,
+        error: 'Dynamic imports (await import(...)) are not supported. All modules (database, processing, alignment, design, validation) are pre-loaded and available directly. Example: use "database.getSequences()" instead of "await import(\'database\')"',
+        executionTime: Date.now() - startTime,
+      };
+    }
+
     // Create secure VM context
     const context = createExecutionContext();
 

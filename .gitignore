@@ -14,6 +14,7 @@ node_modules/
 workspace/
 logs/
 tmp/
+code-execution/dist/
 
 # Test output directories
 test-output/

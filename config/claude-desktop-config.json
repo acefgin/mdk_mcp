@@ -1,5 +1,18 @@
 {
   "mcpServers": {
+    "MCP_DOCKER": {
+      "command": "docker",
+      "args": [
+        "mcp",
+        "gateway",
+        "run"
+      ],
+      "env": {
+        "LOCALAPPDATA": "C:\\Users\\roche\\AppData\\Local",
+        "ProgramData": "C:\\ProgramData",
+        "ProgramFiles": "C:\\Program Files"
+      }
+    },
     "mdk-ts-mcp": {
       "command": "wsl",
       "args": [
@@ -10,6 +23,31 @@
       ],
       "env": {
         "DEBUG": "false"
+      }
+    },
+    "code-execution-sandbox": {
+      "command": "wsl",
+      "args": [
+        "-e",
+        "bash",
+        "-c",
+        "cd /home/cxl/MDK_Design/mdk_mcp/code-execution && node dist/executor.js"
+      ],
+      "env": {
+        "EXECUTION_TIMEOUT": "30000",
+        "MAX_OUTPUT_SIZE": "1048576",
+        "WORKSPACE_PATH": "/home/cxl/MDK_Design/mdk_mcp/workspace"
+      }
+    },
+    "n8n-mcp": {
+      "command": "npx",
+      "args": ["n8n-mcp"],
+      "env": {
+        "MCP_MODE": "stdio",
+        "LOG_LEVEL": "error",
+        "DISABLE_CONSOLE_OUTPUT": "true",
+        "N8N_API_URL": "https://raycifengn8n.duckdns.org/",
+        "N8N_API_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1NzM3OTUzNy1lYTkxLTRiOGEtYTY1MS1jOWIyYjdhZDc1ZWQiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzYwNjM3MDU5LCJleHAiOjE3NjgzNjY4MDB9.4dvqYLFHLP-pKNW84v67vgndW49V_GzbBfiUPJA0dL0"
       }
     }
   }

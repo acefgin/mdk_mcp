@@ -151,6 +151,9 @@ services:
       - workspace_cache:/workspace/cache
       - workspace_results:/workspace/results
       - ./workspace/servers:/workspace/servers:ro  # Read-only access to tool modules
+      - ./workspace/lib:/workspace/lib:ro  # MCP client library
+      - ./workspace/helpers.js:/workspace/helpers.js:ro  # Helper functions
+      - ./workspace/helpers.js.map:/workspace/helpers.js.map:ro  # Source map
       - ./mcp_servers:/app/mcp_servers:ro  # Read-only access to shared utilities
       - ./results:/results  # Shared results directory
     restart: unless-stopped
