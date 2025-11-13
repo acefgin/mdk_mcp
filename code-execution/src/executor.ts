@@ -18,10 +18,10 @@ import {
   ListToolsRequestSchema,
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
-import { VM } from 'vm2';
+import vm from 'vm';
 import { promises as fs } from 'fs';
 import path from 'path';
-import * as helpers from '../../workspace/helpers.js';
+import * as helpers from './helpers.js';
 
 // Configuration from environment
 const EXECUTION_TIMEOUT = parseInt(process.env.EXECUTION_TIMEOUT || '30000', 10);
@@ -162,30 +162,59 @@ async function executeCode(
     }
 
     // Create secure VM context
-    const context = createExecutionContext();
+    const contextData = createExecutionContext();
 
     // Load MCP tool modules
     const toolModules = await loadToolModules();
-    Object.assign(context, toolModules);
+    Object.assign(contextData, toolModules);
 
-    // Create VM with security restrictions
-    const vm = new VM({
-      timeout,
-      sandbox: context,
-      eval: false,
-      wasm: false,
-      fixAsync: true,
-    });
+    // Create VM context
+    const context = vm.createContext(contextData);
 
-    // Execute code
-    const result = await vm.run(`
+    // Wrap code in async function for execution
+    const wrappedCode = `
       (async () => {
         ${code}
       })()
-    `);
+    `;
+
+    // Execute with timeout
+    let result: any;
+    let timeoutHandle: NodeJS.Timeout | null = null;
+
+    try {
+      const script = new vm.Script(wrappedCode, {
+        filename: 'user-code.js',
+      });
+
+      // Create timeout promise
+      const timeoutPromise = new Promise((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(new Error(`Execution timeout exceeded after ${timeout}ms`));
+        }, timeout);
+      });
+
+      // Race between execution and timeout
+      result = await Promise.race([
+        script.runInContext(context, {
+          timeout: timeout,
+        }),
+        timeoutPromise,
+      ]);
+
+      // Clear timeout if execution completed
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
+    } catch (execError: any) {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
+      throw execError;
+    }
 
     // Get console logs
-    const logs = (context.console as any)._getLogs();
+    const logs = (contextData.console as any)._getLogs();
 
     // Calculate execution time
     const executionTime = Date.now() - startTime;

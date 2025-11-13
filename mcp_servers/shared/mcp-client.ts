@@ -277,7 +277,8 @@ export class MCPClient {
 
     // Execute via docker exec
     const requests = [initRequest, toolRequest].join('\n');
-    const command = `echo '${requests.replace(/'/g, "'\\''")}' | docker exec -i ${serverConfig.container} python3 -`;
+    const scriptPath = getServerScriptPath(serverName);
+    const command = `echo '${requests.replace(/'/g, "'\\''")}' | docker exec -i ${serverConfig.container} python3 ${scriptPath}`;
 
     try {
       const { stdout } = await execAsync(command, {
@@ -285,9 +286,16 @@ export class MCPClient {
         maxBuffer: 10 * 1024 * 1024, // 10MB
       });
 
-      // Parse response (second line is the tool result)
+      // Parse response - filter out log lines and only parse JSON lines
       const lines = stdout.trim().split('\n');
-      const toolResponse = JSON.parse(lines[1] || '{}');
+      const jsonLines = lines.filter(line => line.trim().startsWith('{'));
+
+      if (jsonLines.length < 2) {
+        throw new Error(`Expected 2 JSON responses, got ${jsonLines.length}. Output: ${stdout.substring(0, 500)}`);
+      }
+
+      // Second JSON line is the tool result
+      const toolResponse = JSON.parse(jsonLines[1]);
 
       if (toolResponse.error) {
         throw new Error(toolResponse.error.message || 'Tool execution failed');
@@ -353,7 +361,8 @@ export class MCPClient {
 
     // Execute via docker exec
     const requests = [initRequest, listRequest].join('\n');
-    const command = `echo '${requests.replace(/'/g, "'\\''")}' | docker exec -i ${containerName} python3 -`;
+    const scriptPath = getServerScriptPath(serverName);
+    const command = `echo '${requests.replace(/'/g, "'\\''")}' | docker exec -i ${containerName} python3 ${scriptPath}`;
 
     try {
       const { stdout } = await execAsync(command, {
@@ -361,9 +370,15 @@ export class MCPClient {
         maxBuffer: 10 * 1024 * 1024,
       });
 
-      // Parse response
+      // Parse response - filter out log lines and only parse JSON lines
       const lines = stdout.trim().split('\n');
-      const listResponse = JSON.parse(lines[1] || '{}');
+      const jsonLines = lines.filter(line => line.trim().startsWith('{'));
+
+      if (jsonLines.length < 2) {
+        throw new Error(`Expected 2 JSON responses, got ${jsonLines.length}. Output: ${stdout.substring(0, 500)}`);
+      }
+
+      const listResponse = JSON.parse(jsonLines[1]);
 
       if (listResponse.error) {
         throw new Error(listResponse.error.message || 'Failed to list tools');
@@ -459,6 +474,16 @@ const CONTAINER_MAP: Record<string, string> = {
   design: 'ndiag-design-server',
   validation: 'ndiag-validation-server',
 };
+
+/**
+ * Get MCP server script path from server name
+ *
+ * @param serverName - Server name (e.g., 'database', 'processing')
+ * @returns Script path (e.g., 'database_mcp_server.py')
+ */
+function getServerScriptPath(serverName: string): string {
+  return `${serverName}_mcp_server.py`;
+}
 
 /**
  * Check which Docker containers are not running

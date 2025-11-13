@@ -17,11 +17,17 @@ FROM node:20-alpine
 RUN addgroup -g 1001 -S sandbox && \
     adduser -u 1001 -S sandbox -G sandbox
 
-# Install security tools and minimal utilities
+# Install security tools, minimal utilities, and Docker CLI for MCP communication
 RUN apk add --no-cache \
     dumb-init \
     tini \
+    docker-cli \
     && rm -rf /var/cache/apk/*
+
+# Create docker group with same GID as host (110) and add sandbox user to it
+# This allows sandbox user to access Docker socket
+RUN addgroup -g 110 docker 2>/dev/null || true && \
+    addgroup sandbox docker
 
 # Create workspace directory with proper permissions
 RUN mkdir -p /workspace/data /workspace/cache /workspace/results && \

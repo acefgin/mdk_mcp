@@ -156,6 +156,7 @@ services:
       - ./workspace/helpers.js.map:/workspace/helpers.js.map:ro  # Source map
       - ./mcp_servers:/app/mcp_servers:ro  # Read-only access to shared utilities
       - ./results:/results  # Shared results directory
+      - /var/run/docker.sock:/var/run/docker.sock  # Docker socket for MCP tool communication
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
