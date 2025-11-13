@@ -27,17 +27,19 @@ export default defineConfig({
         statements: 90,
       },
     },
-    include: ['tests/**/*.test.ts'],
+    include: [
+      'tests/**/*.test.ts',
+      'mcp_servers/shared/tests/**/*.test.ts',
+      'code-execution/tests/**/*.test.ts'
+    ],
     exclude: [
       '**/node_modules/**',
       '**/dist/**',
-      // Exclude tests for workspace files that don't exist yet
-      'tests/unit/executor.test.ts',
+      // Exclude tests for features not yet implemented
       'tests/unit/pii-tokenizer.test.ts',
       'tests/unit/skills-manager.test.ts',
       'tests/integration/all-servers.test.ts',
       'tests/integration/database-tools.test.ts',
-      'tests/integration/mcp-client.test.ts',
     ],
     testTimeout: 10000,
     hookTimeout: 10000,

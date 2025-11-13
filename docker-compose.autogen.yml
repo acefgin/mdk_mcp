@@ -131,6 +131,45 @@ services:
       retries: 3
 
   # ========================================
+  # Code Execution Sandbox
+  # ========================================
+
+  code-execution-sandbox:
+    build: ./code-execution
+    container_name: code-execution-sandbox
+    stdin_open: true  # Required for MCP stdio protocol
+    tty: false
+    networks:
+      - ndiag-network
+    environment:
+      - EXECUTION_TIMEOUT=30000
+      - MAX_OUTPUT_SIZE=1048576
+      - WORKSPACE_PATH=/workspace
+      - NODE_ENV=production
+    volumes:
+      - workspace_data:/workspace/data
+      - workspace_cache:/workspace/cache
+      - workspace_results:/workspace/results
+      - ./workspace/servers:/workspace/servers:ro  # Read-only access to tool modules
+      - ./mcp_servers:/app/mcp_servers:ro  # Read-only access to shared utilities
+      - ./results:/results  # Shared results directory
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 100
+    healthcheck:
+      test: ["CMD", "node", "-e", "console.log('healthy')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ========================================
   # AutoGen Application
   # ========================================
 
@@ -143,6 +182,7 @@ services:
       - alignment-server
       - design-server
       - validation-server
+      - code-execution-sandbox
     networks:
       - ndiag-network
     env_file:
@@ -195,6 +235,12 @@ volumes:
   design_cache:
     driver: local
   validation_cache:
+    driver: local
+  workspace_data:
+    driver: local
+  workspace_cache:
+    driver: local
+  workspace_results:
     driver: local
   results:
     driver: local

@@ -408,16 +408,6 @@ ${properties}
   }
 
   /**
-   * Convert camelCase to kebab-case
-   *
-   * @param str - Camel case string
-   * @returns Kebab case string
-   */
-  private camelToKebab(str: string): string {
-    return str.replace(/([A-Z])/g, "-$1").toLowerCase().replace(/^-/, "");
-  }
-
-  /**
    * Capitalize first letter
    *
    * @param str - Input string

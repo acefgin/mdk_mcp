@@ -17,7 +17,7 @@ import {
   McpError,
   ErrorCode,
 } from '@modelcontextprotocol/sdk/types.js';
-import { checkContainers } from './lib/mcp-client.js';
+import { checkContainers } from './mcp-client.js';
 
 /**
  * Tool definitions for all 34 tools across 5 servers

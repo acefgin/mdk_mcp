@@ -7,11 +7,12 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "build": "npm run generate-tools:all && npm run build:lib && npm run build:servers && npm run build:mcp-server",
+    "build": "npm run generate-tools:all && npm run build:shared && npm run build:servers && npm run build:mcp-server && npm run build:executor",
     "generate-tools:all": "tsx examples/generate-all-tools.ts",
-    "build:lib": "tsc workspace/lib/mcp-client.ts --outDir workspace/lib --module ES2022 --target ES2022 --moduleResolution node --esModuleInterop --skipLibCheck --declaration",
+    "build:shared": "tsc -p mcp_servers/shared/tsconfig.json",
     "build:servers": "cd workspace && tsc servers/**/*.ts --outDir . --module ES2022 --target ES2022 --moduleResolution node --esModuleInterop --skipLibCheck && cd ..",
     "build:mcp-server": "tsc workspace/mcp-server.ts --outDir workspace --module ES2022 --target ES2022 --moduleResolution node --esModuleInterop --skipLibCheck",
+    "build:executor": "cd code-execution && npm install && npm run build",
     "start": "node workspace/mcp-server.js",
     "start:debug": "DEBUG=true node workspace/mcp-server.js",
     "docker:up": "docker-compose -f docker-compose.autogen.yml up -d",
@@ -20,7 +21,9 @@
     "docker:status": "docker ps --filter 'name=ndiag'",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:shared": "vitest run mcp_servers/shared/tests",
+    "test:executor": "cd code-execution && npm test"
   },
   "keywords": [
     "bioinformatics",
