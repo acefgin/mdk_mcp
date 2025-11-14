@@ -1,0 +1,36 @@
+{
+  "name": "mdk-code-execution-sandbox",
+  "version": "1.0.0",
+  "description": "Secure code execution sandbox for MCP tool orchestration",
+  "main": "dist/executor.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc && cp src/helpers.js src/helpers.d.ts dist/",
+    "clean": "rm -rf dist",
+    "start": "node dist/executor.js",
+    "dev": "tsx src/executor.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "mcp",
+    "code-execution",
+    "sandbox",
+    "bioinformatics"
+  ],
+  "author": "mdk_mcp",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.0.4"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

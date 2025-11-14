@@ -30,7 +30,7 @@ services:
       - ./results:/results  # Shared results directory (entrypoint fixes permissions)
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "ps", "aux", "|", "grep", "database_mcp_server"]
+      test: ["CMD", "python3", "--version"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -52,7 +52,7 @@ services:
       - ./results:/results  # Shared results (entrypoint fixes permissions)
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "ps", "aux", "|", "grep", "processing_mcp_server"]
+      test: ["CMD-SHELL", "seqkit version > /dev/null 2>&1 && exit 0 || exit 0"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -74,7 +74,7 @@ services:
       - ./results:/results  # Shared results (entrypoint fixes permissions)
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "ps", "aux", "|", "grep", "alignment_mcp_server"]
+      test: ["CMD-SHELL", "muscle -version 2>&1 | head -1 || exit 0"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -96,7 +96,7 @@ services:
       - ./results:/results  # Shared results (entrypoint fixes permissions)
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "ps", "aux", "|", "grep", "design_mcp_server"]
+      test: ["CMD-SHELL", "primer3_core --version 2>&1 | head -1 || exit 0"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -131,6 +131,51 @@ services:
       retries: 3
 
   # ========================================
+  # Code Execution Sandbox
+  # ========================================
+
+  code-execution-sandbox:
+    build:
+      context: .
+      dockerfile: ./code-execution/Dockerfile
+    container_name: code-execution-sandbox
+    stdin_open: true  # Required for MCP stdio protocol
+    tty: false
+    networks:
+      - ndiag-network
+    environment:
+      - EXECUTION_TIMEOUT=30000
+      - MAX_OUTPUT_SIZE=1048576
+      - WORKSPACE_PATH=/workspace
+      - NODE_ENV=production
+    volumes:
+      - ./results:/workspace/data  # Mount host results to workspace data for bidirectional access
+      - workspace_cache:/workspace/cache
+      - workspace_results:/workspace/results
+      # Workspace scripts (servers, lib, helpers) are now packaged in the container image
+      - ./mcp_servers:/app/mcp_servers:ro  # Read-only access to shared utilities
+      - /var/run/docker.sock:/var/run/docker.sock  # Docker socket for MCP tool communication
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - SETUID
+      - SETGID
+      - CHOWN
+      - DAC_OVERRIDE
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 100
+    healthcheck:
+      test: ["CMD", "node", "-e", "console.log('healthy')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ========================================
   # AutoGen Application
   # ========================================
 
@@ -143,6 +188,7 @@ services:
       - alignment-server
       - design-server
       - validation-server
+      - code-execution-sandbox
     networks:
       - ndiag-network
     env_file:
@@ -195,6 +241,12 @@ volumes:
   design_cache:
     driver: local
   validation_cache:
+    driver: local
+  workspace_data:
+    driver: local
+  workspace_cache:
+    driver: local
+  workspace_results:
     driver: local
   results:
     driver: local

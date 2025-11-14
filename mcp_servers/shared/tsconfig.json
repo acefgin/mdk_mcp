@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "./ts_src",
+    "outDir": "./dist",
+    "composite": true,
+    "declarationMap": true
+  },
+  "include": [
+    "ts_src/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "tests",
+    "**/*.test.ts",
+    "**/*.spec.ts",
+    "ts_src/mcp-server.ts"
+  ]
+}

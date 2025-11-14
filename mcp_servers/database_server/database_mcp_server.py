@@ -372,8 +372,8 @@ async def get_sequences(
             if search_result.empty:
                 return f"No results found for {taxon} {region} in Ensembl"
             
-            # Get sequences for found IDs
-            ens_ids = search_result.index.tolist()[:max_results]
+            # Get sequences for found IDs (use ensembl_id column, not index)
+            ens_ids = search_result["ensembl_id"].tolist()[:max_results]
             sequences = gget.seq(ens_ids, translate=False)
             
             result = format_sequences(sequences, format)

@@ -1,806 +1,754 @@
-# mdk_mcp - Neglected Diagnostics MCP Platform
+# mdk_mcp - Bioinformatics Tools for qPCR Assay Design
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![AG2](https://img.shields.io/badge/AG2-0.7.5-green.svg)](https://github.com/ag2ai/ag2)
-[![MCP](https://img.shields.io/badge/MCP-0.9.0-purple.svg)](https://modelcontextprotocol.io)
+[![Node.js 20+](https://img.shields.io/badge/node.js-20+-green.svg)](https://nodejs.org/)
+[![MCP](https://img.shields.io/badge/MCP-2.0-purple.svg)](https://modelcontextprotocol.io)
 
-An **MCP (Model Context Protocol)** based multi-agent AI system for designing species-specific qPCR assays for molecular diagnostics. The system uses AG2 (formerly AutoGen) to orchestrate specialized AI agents that collaborate to retrieve sequences, analyze data, and recommend primer design strategies.
+**AI-powered bioinformatics platform** for designing species-specific qPCR primers using the Model Context Protocol (MCP). Access 34 specialized tools for sequence retrieval, alignment, and primer design through natural language.
 
-**🎉 Phase 4 Complete!** The system now includes complete primer design capabilities with signature region discovery, Primer3 integration, and quality control. **27 total MCP tools** available across database, processing, alignment, and design servers.
+## 🎯 What Can You Do?
 
-## 🎯 What is mdk_mcp?
+- **Retrieve sequences** from NCBI, BOLD, SILVA, UNITE databases
+- **Analyze and align** sequences with quality control
+- **Design primers** with automatic signature region detection
+- **Validate primers** with BLAST and in-silico PCR
+- Use via **Claude Desktop** (lightweight) or **Interactive Terminal** (full automation)
 
-mdk_mcp is a **bioinformatics automation platform** that combines:
-- **MCP Servers**: Modular bioinformatics tools (sequence retrieval, alignment, primer design)
-- **AG2 Agents**: Collaborative AI agents with specialized roles
-- **Interactive Interface**: Natural language chat for qPCR assay design
-- **Task Logging**: Comprehensive workflow tracking and audit trails
+## 🚀 Quick Start
 
-### Primary Use Case: qPCR Assay Design
+Choose your preferred method:
 
-Scientists can interact naturally with the system to design species-specific qPCR primers:
+### Option 1: Claude Desktop Integration (Recommended)
 
+**Best for:** Individual use, quick access to tools, Windows/Mac users
+
+[Jump to detailed guide →](#-option-1-claude-desktop-detailed-guide)
+
+### Option 2: Interactive Terminal with AI Agents
+
+**Best for:** Automated workflows, batch processing, research projects
+
+[Jump to detailed guide →](#-option-2-interactive-terminal-detailed-guide)
+
+---
+
+## 📋 Option 1: Claude Desktop (Detailed Guide)
+
+Use all 34 bioinformatics tools directly from Claude Desktop.
+
+### Prerequisites
+
+- **Docker Desktop** installed and running
+- **Claude Desktop** (Windows or Mac)
+- **WSL2** (Windows only) - [Install guide](https://learn.microsoft.com/en-us/windows/wsl/install)
+- **Node.js 20+** - [Download](https://nodejs.org/)
+
+### Step-by-Step Setup (Fresh Installation)
+
+#### 1. Clone Repository
+
+```bash
+# Open terminal (WSL on Windows, Terminal on Mac/Linux)
+git clone https://github.com/acefgin/mdk_mcp.git
+cd mdk_mcp
+```
+
+#### 2. Build TypeScript Components
+
+```bash
+# Install dependencies
+npm install
+
+# Build everything (takes 1-2 minutes)
+npm run build
+
+# Expected output:
+# ✅ Successfully generated 34 tools across 5 servers!
+# ✓ Build complete
+```
+
+**What gets built:**
+- MCP client library (Docker communication bridge)
+- 34 TypeScript tool wrappers (type-safe interfaces)
+- Main MCP server for Claude Desktop
+- Helper utilities and modules
+
+#### 3. Build Code Execution Sandbox Container
+
+**Important:** The code-execution-sandbox packages workspace scripts directly into the image, so it must be built AFTER the TypeScript workspace is compiled.
+
+```bash
+# Build the container image (packages workspace scripts inside)
+docker build -f code-execution/Dockerfile -t code-execution-sandbox .
+
+# Expected output:
+# Successfully built code-execution-sandbox
+# Container includes: /workspace/servers, /workspace/lib, /workspace/types
+```
+
+#### 4. Start MCP Server Containers
+
+**⚠️ CRITICAL:** The code-execution-sandbox needs these MCP server containers to execute tool calls (database, processing, alignment, design, validation). They MUST be running!
+
+```bash
+# Start all MCP server containers
+npm run docker:up
+
+# Wait 10-15 seconds for initialization
+```
+
+**Why are these containers needed?**
+- The code-execution-sandbox communicates with MCP servers via Docker
+- Each tool call (database.getSequences, processing.fastaQc, etc.) runs in its respective container
+- Without these containers, code execution will fail with "Cannot connect to Docker daemon"
+
+**Verify code-execution-sandbox is ready:**
+```bash
+# Test the container
+docker run --rm -i --name test-code-exec \
+  -e EXECUTION_TIMEOUT=30000 \
+  -e MAX_OUTPUT_SIZE=1048576 \
+  -e WORKSPACE_PATH=/workspace \
+  code-execution-sandbox
+
+# Expected output (press Ctrl+C after seeing):
+# Starting Code Execution Sandbox...
+# Loaded MCP servers: alignment, database, design, processing, validation
+# Code Execution Sandbox ready
+```
+
+**If you started all containers, verify they're running:**
+```bash
+docker ps --format "table {{.Names}}\t{{.Status}}"
+
+# Should show (if using docker:up):
+# code-execution-sandbox    Up (healthy)
+# ndiag-validation-server   Up (healthy)  
+# ndiag-design-server       Up
+# ndiag-alignment-server    Up
+# ndiag-processing-server   Up
+# ndiag-database-server     Up
+# qpcr-assistant            Up
+```
+
+#### 5. Configure Claude Desktop
+
+**Windows (WSL2):**
+
+1. Press `Win + R`, type `%APPDATA%\Claude`, press Enter
+2. Open or create `claude_desktop_config.json`
+3. Add this configuration (replace `YOUR_USERNAME` with your WSL username):
+
+```json
+{
+  "mcpServers": {
+    "mdk-ts-mcp": {
+      "command": "wsl",
+      "args": [
+        "-e",
+        "bash",
+        "-c",
+        "cd /home/YOUR_USERNAME/mdk_mcp && node workspace/mcp-server.js"
+      ],
+      "env": {
+        "DEBUG": "false"
+      }
+    },
+    "code-execution-sandbox": {
+      "command": "wsl",
+      "args": [
+        "-e",
+        "bash",
+        "-c",
+        "docker run --rm -i --name code-execution-sandbox --mount type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock -e EXECUTION_TIMEOUT=30000 -e MAX_OUTPUT_SIZE=1048576 -e WORKSPACE_PATH=/workspace code-execution-sandbox"
+      ]
+    }
+  }
+}
+```
+
+**⚠️ Important Notes:**
+- **No workspace mount needed** - Scripts are now packaged in the container image
+- **Docker socket mount required** - Enables communication with MCP server containers
+- Container is self-contained and portable
+
+**macOS/Linux:**
+
+1. Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `~/.config/Claude/claude_desktop_config.json` (Linux)
+2. Add this configuration (replace with your actual path):
+
+```json
+{
+  "mcpServers": {
+    "mdk-ts-mcp": {
+      "command": "node",
+      "args": [
+        "/absolute/path/to/mdk_mcp/workspace/mcp-server.js"
+      ],
+      "env": {
+        "DEBUG": "false"
+      }
+    },
+    "code-execution-sandbox": {
+      "command": "docker",
+      "args": [
+        "run",
+        "--rm",
+        "-i",
+        "--name", "code-execution-sandbox",
+        "--mount", "type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock",
+        "-e", "EXECUTION_TIMEOUT=30000",
+        "-e", "MAX_OUTPUT_SIZE=1048576",
+        "-e", "WORKSPACE_PATH=/workspace",
+        "code-execution-sandbox"
+      ]
+    }
+  }
+}
+```
+
+**⚠️ Important Notes:**
+- **No workspace mount needed** - Scripts are now packaged in the container image
+- **Docker socket mount required** - Enables communication with MCP server containers
+- Container is self-contained and portable
+
+#### 6. Restart Claude Desktop
+
+- Quit Claude Desktop completely
+- Start Claude Desktop again
+- Look for the 🔌 icon in the bottom-right corner
+
+#### 7. Test the Connection
+
+In Claude Desktop, try:
+
+```
+What MCP tools do you have available?
+```
+
+You should see **35 tools** listed across 6 categories:
+- **database** (11 tools) - Sequence retrieval
+- **processing** (5 tools) - Quality control  
+- **alignment** (5 tools) - Sequence alignment
+- **design** (6 tools) - Primer design
+- **validation** (7 tools) - Primer validation
+- **execute_code** (1 tool) - Code execution sandbox
+
+### What is the Code Execution Sandbox?
+
+The `code-execution-sandbox` provides a **secure Docker environment** for executing JavaScript/TypeScript code with access to all MCP tool modules. This enables:
+
+**🎯 Context-Efficient Data Processing:**
+```
+Traditional: Load 100 sequences into context → 50,000 tokens
+Code Execution: Process in code, return summary → 200 tokens
+Result: 99.6% token reduction
+```
+
+**Key Benefits:**
+- ✅ **99%+ token reduction** - Process data in code, not through the AI
+- ✅ **Unlimited dataset size** - No context window limits
+- ✅ **Secure isolation** - Docker-based sandbox with resource limits
+- ✅ **Helper functions** - Pre-built utilities for FASTA processing, statistics, etc.
+- ✅ **Direct tool access** - Import and use all MCP tools directly
+
+**Example Usage:**
+```javascript
+// Instead of loading all sequences into context:
+// "Get 1000 COI sequences and show me all of them" → 150,000 tokens ❌
+
+// Process in the execution sandbox:
+"Execute code to retrieve 1000 COI sequences for Salmo salar,
+calculate statistics (count, avg length, GC content),
+and return only the summary."
+
+// Claude will use execute_code tool:
+const sequences = await database.getSequences({
+  taxon: "Salmo salar",
+  region: "COI", 
+  max_results: 1000
+});
+
+const stats = parseFastaStats(sequences);
+return stats; 
+// Returns: { count: 1000, avgLength: 658, gcContent: 48.2% }
+// Context usage: ~300 tokens ✅
+```
+
+**When to use Code Execution:**
+- Processing large sequence datasets (>100 sequences)
+- Calculating statistics without loading raw data
+- Filtering/transforming data before analysis
+- Batch processing multiple tool calls
+- Complex data manipulation workflows
+
+### Example Usage in Claude Desktop
+
+**Basic tool usage:**
+```
+Get 50 COI sequences for Salmo salar from NCBI,
+filter for sequences longer than 400bp,
+and show me basic statistics.
+```
+
+Claude will automatically:
+1. Call `database_getSequences` to retrieve sequences
+2. Call `processing_fastaQc` for quality control
+3. Return statistics and save results
+
+**Code execution (for large datasets):**
+```
+Execute code to retrieve 500 COI sequences for both 
+Salmo salar and Oncorhynchus mykiss, calculate sequence 
+statistics for each species, and compare GC content.
+```
+
+Claude will:
+1. Use `execute_code` tool to run code in the sandbox
+2. Process all data within the sandbox
+3. Return only the comparison results (not raw sequences)
+4. Save ~100,000 tokens vs traditional approach
+
+### Troubleshooting
+
+**No tools showing up:**
+```bash
+# Check if containers are running
+docker ps | grep ndiag
+
+# Check if build was successful
+ls -l workspace/mcp-server.js
+
+# Test MCP server manually
+node workspace/mcp-server.js
+# Should output: ✅ mdk-mcp-typescript v2.0.0 running on stdio
+```
+
+**Connection errors:**
+```bash
+# View Claude Desktop logs (Windows)
+# Open: %APPDATA%\Claude\logs\mcp*.log
+
+# Restart Docker containers
+npm run docker:down
+npm run docker:up
+```
+
+**Tool execution errors:**
+```bash
+# Check container logs
+docker logs ndiag-database-server
+docker logs ndiag-processing-server
+
+# Check code execution sandbox
+docker logs code-execution-sandbox
+
+# Rebuild code execution sandbox if needed
+cd code-execution
+npm run build
+docker build -t code-execution-sandbox .
+```
+
+**Code execution not working:**
+```bash
+# Verify code-execution-sandbox image exists
+docker images | grep code-execution-sandbox
+
+# If missing or outdated, rebuild (from project root):
+# 1. First ensure workspace is built
+npm run build:workspace
+
+# 2. Then rebuild container with packaged scripts
+docker build -f code-execution/Dockerfile -t code-execution-sandbox .
+
+# Test manually (no mount needed - scripts are inside)
+docker run --rm -i --name test-exec \
+  -e WORKSPACE_PATH=/workspace \
+  code-execution-sandbox
+# Expected: "Loaded MCP servers: alignment, database, design, processing, validation"
+# Press Ctrl+C after seeing "Code Execution Sandbox ready"
+```
+
+**After updating workspace scripts:**
+```bash
+# When you modify workspace TypeScript files, rebuild:
+cd /home/cxl/MDK_Design/mdk_mcp
+
+# 1. Rebuild TypeScript
+npm run build:workspace
+
+# 2. Rebuild container image (packages new scripts)
+docker build -f code-execution/Dockerfile -t code-execution-sandbox .
+
+# 3. Restart Claude Desktop to use new image
+```
+
+---
+
+## 📋 Option 2: Interactive Terminal (Detailed Guide)
+
+Use AI agents that automatically orchestrate complex qPCR design workflows.
+
+### Prerequisites
+
+- **Docker Desktop** installed and running
+- **LLM API Key**: Get one of these:
+  - **Google Gemini API** (recommended - free tier) - [Get key](https://makersuite.google.com/app/apikey)
+  - **OpenAI API** (GPT-4) - [Get key](https://platform.openai.com/api-keys)
+
+### Step-by-Step Setup (Fresh Installation)
+
+#### 1. Clone Repository
+
+```bash
+git clone https://github.com/acefgin/mdk_mcp.git
+cd mdk_mcp
+```
+
+#### 2. Configure API Keys
+
+Create the configuration file:
+
+```bash
+# For Google Gemini (Recommended - Free tier, 1M context window)
+echo "GOOGLE_API_KEY=your-actual-api-key-here" > autogen_app/.env
+
+# Or for OpenAI GPT-4
+echo "OPENAI_API_KEY=sk-your-actual-key-here" > autogen_app/.env
+
+# Or use both (system tries Gemini first)
+echo "GOOGLE_API_KEY=your-gemini-key" > autogen_app/.env
+echo "OPENAI_API_KEY=your-openai-key" >> autogen_app/.env
+
+# Optional: NCBI API key (higher rate limits for sequence retrieval)
+echo "NCBI_API_KEY=your-ncbi-key" >> autogen_app/.env
+```
+
+**⚠️ Important:** Replace `your-actual-api-key-here` with your real API key!
+
+#### 3. Start the System
+
+```bash
+# Make the script executable (first time only)
+chmod +x start_interactive.sh
+
+# Start everything with one command
+./start_interactive.sh
+```
+
+**What happens:**
+1. Creates `/results` directory for output files
+2. Builds Docker images (takes 5-10 minutes first time)
+3. Starts 7 containers (MCP servers + qPCR assistant)
+4. Waits for services to initialize
+5. Opens interactive chat interface
+
+**Expected output:**
+```
+╔══════════════════════════════════════════════════════════════════════════╗
+║               qPCR ASSISTANT - Interactive Mode Launcher                 ║
+╚══════════════════════════════════════════════════════════════════════════╝
+
+🔧 Setting up environment...
+   ✓ Environment configured
+
+🔍 Checking environment configuration...
+   ✓ Environment configuration found
+
+🚀 Starting qPCR Assistant system...
+   • Building containers (may take a few minutes on first run)...
+   ✓ Containers building and starting...
+   ✓ All containers started successfully
+
+🎉 qPCR Assistant is ready!
+
+┌─[qPCR Assistant]
+└─> _
+```
+
+#### 4. Try Your First Request
+
+Type naturally - the AI agents will understand:
+
+**Simple example:**
+```
+┌─[qPCR Assistant]
+└─> Get 100 COI sequences for Salmo salar and show me basic statistics
+```
+
+**Complex example:**
 ```
 ┌─[qPCR Assistant]
 └─> Design a qPCR assay to identify Atlantic salmon (Salmo salar)
     and distinguish it from rainbow trout (Oncorhynchus mykiss).
-    Target: COI region for aquaculture verification.
+    Target the COI region for aquaculture verification.
+```
 
+**Watch the agents work:**
+```
 🚀 STARTING WORKFLOW
 
 [Coordinator] Planning workflow...
-  Step 1: Retrieve COI sequences for Salmo salar
-  Step 2: Perform quality control on sequences
-  Step 3: Retrieve COI sequences for Oncorhynchus mykiss
-  Step 4: Analyze for signature regions
-  Step 5: Recommend primer design strategy
+  Phase 1: Retrieve sequences
+  Phase 2: Quality control  
+  Phase 3: Alignment analysis
+  Phase 4: Primer design
 
-[DatabaseAgent] Calling tool: get_sequences
-  Arguments: taxon="Salmo salar", region="COI", max_results=100
-  ✓ Retrieved 100 sequences → /results/sequences/Salmo_salar_COI_20251023.fasta
-
-[DatabaseAgent] Calling tool: fasta_qc
-  Arguments: min_length=400, max_n_percent=5.0, remove_duplicates=true
-  ✓ QC Complete: 87 sequences passed (13 removed: 8 short, 3 high N-content, 2 duplicates)
-
-[DatabaseAgent] Calling tool: get_sequences
-  Arguments: taxon="Oncorhynchus mykiss", region="COI", max_results=100
-  ✓ Retrieved 100 sequences → /results/sequences/Oncorhynchus_mykiss_COI_20251023.fasta
+[DatabaseAgent] Retrieving sequences...
+  ✓ Retrieved 100 sequences for Salmo salar
+  ✓ Retrieved 100 sequences for Oncorhynchus mykiss
 
 [AnalystAgent] Analyzing sequences...
-  • Compared 87 Salmo salar vs 95 Oncorhynchus mykiss sequences
-  • Identified 15 conserved regions in target species
-  • Found 3 signature regions unique to Salmo salar
-  • Recommending primers in signature region 2 (position 450-470)
-  • Expected amplicon size: 120bp
+  ✓ Quality control: 87 sequences passed
+  ✓ Alignment complete
+  ✓ Found 3 signature regions
 
-✓ WORKFLOW COMPLETED
-Task log saved to /results/task_20251023_181530.json
-Sequences saved to /results/sequences/ with README.md
+[PrimerDesignAgent] Designing primers...
+  ✓ Designed 5 primer pairs
+  ✓ Validation complete
+
+✓ WORKFLOW COMPLETED in 45 seconds
+Results saved to /results/task_20251113_150530.json
 ```
 
-## 🚀 Quick Start (3 Steps)
+#### 5. Built-in Commands
 
-### Prerequisites
-
-- Docker and Docker Compose
-- **LLM API Key**: Choose one or both:
-  - **Google Gemini API key** (recommended - free tier with 1M context window)
-  - **OpenAI API key** (GPT-4 support)
-- Basic understanding of qPCR assay design
-
-### Step 1: Clone and Configure
-
-```bash
-# Clone repository
-git clone https://github.com/acefgin/mdk_mcp.git
-cd mdk_mcp
-
-# Option A: Use Google Gemini (Recommended - Free with 1M context)
-echo "GOOGLE_API_KEY=your-google-api-key" > autogen_app/.env
-
-# Option B: Use OpenAI GPT-4
-echo "OPENAI_API_KEY=sk-your-key-here" > autogen_app/.env
-
-# Option C: Use both (system will try Gemini first)
-echo "GOOGLE_API_KEY=your-google-api-key" > autogen_app/.env
-echo "OPENAI_API_KEY=sk-your-key-here" >> autogen_app/.env
-
-# Optional: Add NCBI API key for higher rate limits
-echo "NCBI_API_KEY=your-ncbi-key" >> autogen_app/.env
+```
+┌─[qPCR Assistant]
+└─> help     # Show example requests and usage guide
+└─> logs     # View task history  
+└─> clear    # Clear screen
+└─> exit     # Exit (or press Ctrl+D)
 ```
 
-### Step 2: Start Interactive Mode
+#### 6. View Results
+
+Results are saved in the `./results` directory:
 
 ```bash
-# One-command start (recommended)
+# List all results
+ls -lh ./results/
+
+# View task summary
+cat ./results/task_*_summary.txt
+
+# View detailed JSON log
+cat ./results/task_*.json | jq
+
+# Copy sequences to your machine
+cp ./results/sequences/*.fasta ~/my-analysis/
+```
+
+### Managing the System
+
+**Reconnect to running session:**
+```bash
 ./start_interactive.sh
-
-# Or manually
-docker compose -f docker-compose.autogen.yml up -d
-docker attach qpcr-assistant
+# Choose option 1: Attach to existing session
 ```
 
-### Step 3: Use the Assistant
-
-Type your qPCR design requests naturally:
-
-```
-┌─[qPCR Assistant]
-└─> Design qPCR for detecting E. coli O157:H7 in food samples
-
-[Watch agents collaborate in real-time...]
-
-┌─[qPCR Assistant]
-└─> help         # Show examples
-└─> logs         # View task history
-└─> exit         # Exit assistant
-```
-
-## ✨ Key Features
-
-### 🔬 Complete Sequence Processing Pipeline (NEW in Phase 2)
-
-The system now provides end-to-end sequence processing capabilities:
-
-1. **Retrieve** sequences from multiple databases (NCBI, BOLD, SILVA, UNITE)
-2. **Quality Control** - Filter by length, N-content, remove duplicates
-3. **Dereplicate** - Remove redundant sequences, cluster similar ones
-4. **Mask** - Hide low-complexity regions to improve alignment
-5. **Detect Chimeras** - Identify and remove chimeric sequences
-6. **Process** - Run complete pipeline with one command
-
-**Example Workflow:**
-```
-User: "Get 100 COI sequences for Salmo salar and perform quality control"
-
-[DatabaseAgent] → Retrieves 100 sequences from NCBI
-              → Applies QC: min_length=400, max_n_percent=5.0
-              → Result: 87 sequences passed (13 filtered out)
-              → Sequences saved to /results/sequences/
-```
-
-### 🧠 Multiple LLM Support
-
-The system supports multiple language models with automatic fallback:
-
-| Model | Provider | Context Window | Cost | Best For |
-|-------|----------|----------------|------|----------|
-| **gemini-2.5-flash-lite** | Google | 1M tokens | Free tier | Large sequence datasets (recommended) |
-| **gpt-4** | OpenAI | 128K tokens | Paid | Complex analysis, reasoning |
-
-**Why Gemini 2.5 Flash Lite?**
-- ✅ **1 Million token context window** - Handle large sequence datasets without chunking
-- ✅ **Free tier available** - No cost for reasonable usage
-- ✅ **Fast inference** - Optimized for speed
-- ✅ **Built-in support** - Native AG2 integration via `ag2[gemini]`
-
-Configuration is automatic via `autogen_app/OAI_CONFIG_LIST.json` - the system reads API keys from environment variables.
-
-### 🤖 Multi-Agent Architecture
-
-Four specialized AI agents collaborate in a clear pipeline for qPCR design:
-
-| Agent | Role | Capabilities | Tools | Phase |
-|-------|------|-------------|-------|-------|
-| **Coordinator** | Workflow Manager | Plans workflow, orchestrates agents, synthesizes results | 0 tools | Planning + Summary |
-| **DatabaseAgent** | Data Retrieval | Retrieves sequences from NCBI/BOLD/SILVA/UNITE/SRA | **5 tools*** | Phase 1: Retrieval |
-| **AnalystAgent** | Data Curator & Analyst | QC + processing + alignment + phylogenetics + quality assessment | **10 tools** | Phase 2-3: Curation & Analysis |
-| **PrimerDesignAgent** | Primer Designer | Signature region discovery + Primer3 design + oligo QC | **6 tools** | Phase 4: Design |
-
-\*DatabaseAgent: 5 tools active, 6 more planned (gget suite + advanced SRA)
-
-**Architecture Rationale:**
-- **Clear Pipeline**: Data flows linearly through specialized agents (Retrieve → Curate → Design)
-- **Separation of Concerns**: Each agent has a single, focused responsibility
-- **Balanced Workload**: 5 + 10 + 6 tools (21 active total, 27 including planned) - optimized distribution
-- **Quality Gates**: AnalystAgent assesses data quality before passing to primer design
-- **Scalable**: Easy to add tools to any agent without affecting others (6 database tools + 5 design tools planned)
-
-**Complete Workflow Pipeline:**
-
-```
-User Request
-    ↓
-┌─────────────────────┐
-│   Coordinator       │  Plans 4-phase workflow
-└──────────┬──────────┘
-           ↓
-┌─────────────────────┐
-│  DatabaseAgent      │  Phase 1: Data Retrieval (5 tools)
-│  - get_sequences    │  • Retrieve from NCBI/BOLD/SILVA/UNITE
-│  - get_taxonomy     │  • Verify species names
-│  - get_neighbors    │  • Identify off-targets
-└──────────┬──────────┘
-           │ Raw sequences (.fasta files)
-           ↓
-┌─────────────────────┐
-│  AnalystAgent       │  Phase 2: Complete Data Curation (10 tools)
-│  STEP 1: QC         │  • Quality control (fasta_qc)
-│  - process_sequences│  • Dereplicate, mask, detect chimeras
-│  STEP 2: Alignment  │  • Multiple sequence alignment (MAFFT/MUSCLE)
-│  - align_sequences  │  • Alignment cleaning (CIAlign)
-│  STEP 3: Phylogeny  │  • Build trees, calculate distances
-│  - build_phylogeny  │  • Assess evolutionary relationships
-│  STEP 4: Assessment │  • Evaluate data quality
-│  - Quality report   │  • Identify weak points
-│  STEP 5: Candidates │  • Find conserved regions (>90% target)
-│  - Region analysis  │  • Find variable regions (>30% off-target)
-└──────────┬──────────┘
-           │ Curated data + quality assessment + candidate regions
-           ↓
-┌─────────────────────┐
-│ PrimerDesignAgent   │  Phase 4: Primer Design & QC (6 tools)
-│  - Evaluate regions │  • Assess candidate regions
-│  - Design strategy  │  • Recommend primer parameters
-│  - Validation plan  │  • In-silico validation strategy
-│  - Wet lab protocol│  • Comprehensive validation protocol
-└──────────┬──────────┘
-           │ Primer recommendations + validation protocol
-           ↓
-┌─────────────────────┐
-│   Coordinator       │  Workflow Orchestration & Summary
-│  - Synthesize       │  • Comprehensive workflow summary
-│  - Report           │  • Document limitations
-│  - Next steps       │  • Wet lab implementation guide
-└─────────────────────┘
-```
-
-**Key Innovation - AnalystAgent as Data Curator:**
-- Takes raw sequences from DatabaseAgent
-- Performs **complete data curation pipeline**: QC → processing → alignment → phylogenetics
-- Assesses data quality and identifies potential weak points
-- Provides curated, analysis-ready data to PrimerDesignAgent
-- This ensures high-quality input for primer design decisions
-
-### 🛠️ MCP Tools (15 Tools Active, 6 Planned - Phases 1, 2 & 3 Complete)
-
-#### **Database Server** (Phase 1 ✅ - 5 Tools Active, 6 Planned)
-**Used by:** DatabaseAgent (Phase 1: Data Retrieval)
-
-Access to multiple genomic databases and sequence retrieval:
-
-**Currently Active (5 tools):**
-
-1. **get_sequences** - Retrieve DNA/RNA sequences from NCBI, BOLD, SILVA, UNITE
-2. **get_taxonomy** - Fetch detailed taxonomic information and verify species names
-3. **get_neighbors** - Find taxonomically related species (potential off-targets)
-4. **extract_sequence_columns** - Parse sequence metadata (accession, organism, location, etc.)
-5. **search_sra_studies** - Search NCBI SRA database for sequencing projects
-
-**Planned - Phase 1 Expansion (6 tools):**
-
-6. **gget_ref** - Get reference genomes from Ensembl
-7. **gget_search** - Search Ensembl for genes and transcripts
-8. **gget_info** - Fetch detailed gene/transcript information
-9. **gget_seq** - Retrieve nucleotide or amino acid sequences by ID
-10. **get_sra_runinfo** - Get detailed metadata for SRA runs
-11. **search_sra_cloud** - Query SRA via cloud SQL (BigQuery/Athena)
-
-#### **Processing Server** (Phase 2 ✅ - 5 Tools)
-**Used by:** AnalystAgent (Phase 2: Data Curation - Step 1: QC)
-
-Quality control and sequence processing pipeline:
-
-1. **fasta_qc** - Comprehensive quality control with filtering:
-   - Filter by sequence length (min/max)
-   - Filter by N-content percentage
-   - Remove duplicate sequences
-   - Generate detailed statistics
-
-2. **dereplicate_sequences** - Advanced sequence clustering:
-   - Remove exact duplicates (100% identity)
-   - Cluster similar sequences (97-99% identity)
-   - Per-species dereplication option
-   - Maintains representative sequences
-
-3. **mask_low_complexity** - Sequence masking:
-   - DUST algorithm for low-complexity regions
-   - Masks homopolymers and simple repeats
-   - Prevents spurious alignments
-   - Configurable threshold
-
-4. **detect_chimeras** - Chimera detection:
-   - UCHIME algorithm implementation
-   - De novo chimera detection
-   - Optional chimera removal
-   - Abundance-based filtering
-
-5. **process_sequences** - Unified QC pipeline:
-   - Combines all processing steps
-   - Sequential: QC → Dereplicate → Mask → Chimera detection
-   - Single-command workflow
-   - Comprehensive statistics tracking
-
-#### **Alignment Server** (Phase 3 ✅ - 5 Tools)
-**Used by:** AnalystAgent (Phase 2: Data Curation - Steps 2-3: Alignment & Phylogenetics)
-
-Multiple sequence alignment and phylogenetic analysis:
-
-1. **align_sequences** - Multiple sequence alignment:
-   - Support for MAFFT, MUSCLE, Clustal Omega, gget_muscle
-   - Configurable alignment strategies (linsi, ginsi, einsi for MAFFT)
-   - Automatic algorithm selection
-   - Returns aligned sequences with statistics
-
-2. **process_alignment** - Alignment cleaning and assessment:
-   - CIAlign integration for quality improvement
-   - Gap-rich column removal
-   - Divergent sequence detection
-   - Alignment quality statistics
-
-3. **build_phylogeny** - Phylogenetic tree construction:
-   - Neighbor Joining (NJ) method
-   - Maximum Likelihood (ML) support
-   - Multiple distance models (p-distance, Jukes-Cantor, Kimura)
-   - Bootstrap support
-   - Newick format output
-
-4. **calculate_distances** - Distance matrix calculation:
-   - Pairwise distance calculations
-   - Multiple evolutionary models
-   - p-distance, Jukes-Cantor, Kimura 2-parameter
-   - Matrix format output
-
-5. **align_and_analyze** - Complete alignment pipeline:
-   - Single-command workflow
-   - Alignment + cleaning + phylogeny + distances
-   - Configurable pipeline steps
-   - Comprehensive analysis output
-
-#### **Design Server** (Phase 4 ✅ Complete - 6 Tools)
-**Used by:** PrimerDesignAgent (Phase 4: Primer Design & Validation)
-**Container:** `ndiag-design-server`
-
-Complete primer design pipeline with signature region discovery and Primer3 integration:
-
-1. **find_signature_regions** - Automated candidate region discovery:
-   - Sliding window analysis (150bp windows, 10bp steps)
-   - Conservation scoring within target species (Shannon entropy)
-   - Divergence scoring vs off-target species
-   - GC content and complexity metrics
-   - Returns ranked candidate regions
-
-2. **analyze_specificity** - Specificity analysis:
-   - Target vs off-target comparison
-   - SNP identification for discrimination
-   - Suitability scoring for primer design
-   - Flags high-specificity regions
-
-3. **rank_regions** - Multi-criteria ranking:
-   - Composite scoring with configurable weights
-   - Conservation (40%), Specificity (40%), Complexity (20%)
-   - Returns prioritized candidate list
-   - Customizable weighting schemes
-
-4. **primer3_design** - Primer3 integration:
-   - Full Primer3 wrapper with all parameters
-   - Configurable constraints (size, Tm, GC, product size)
-   - Returns multiple primer pairs per region
-   - Default: 18-27bp, Tm 57-63°C, GC 40-60%
-
-5. **oligo_qc** - Oligonucleotide quality control:
-   - Tm calculation with salt correction
-   - Secondary structure analysis (ViennaRNA)
-   - Hairpin and homodimer detection
-   - Pass/fail flags with quality metrics
-
-6. **design_primers_complete** - End-to-end pipeline:
-   - Orchestrates entire workflow automatically
-   - Region discovery → specificity → ranking → Primer3 → QC
-   - Returns only validated, high-quality primers
-   - Recommended for automated workflows
-
-**Dependencies:** primer3, ViennaRNA, BioPython, primer3-py
-
-### 💬 Interactive Chat Interface
-
-- **Natural Language Input**: Type requests conversationally
-- **Real-time Progress**: See agents working as workflows execute
-- **Built-in Commands**: `help`, `logs`, `clear`, `exit`
-- **Multiple Requests**: Submit many tasks in one session
-- **Workflow Control**: Interrupt with Ctrl+C, detach with Ctrl+P+Q
-
-### 📊 Comprehensive Task Logging
-
-Every workflow generates:
-- **JSON logs** (`task_TIMESTAMP.json`) - Machine-readable workflow data
-- **Text summaries** (`task_TIMESTAMP_summary.txt`) - Human-readable reports
-
-Logs include:
-- User requests and timestamps
-- Agent actions and coordination
-- Tool calls with arguments and results
-- Execution statistics (success/failure counts)
-- Complete message timeline
-
-### 🐳 Containerized Architecture
-
-- **Isolated MCP servers** - Each tool server runs in its own container
-- **AutoGen orchestration** - Separate container for agent runtime
-- **Docker Compose** - One-command deployment
-- **Kubernetes ready** - Production manifests included
-
-## 📖 Documentation
-
-### User Documentation
-
-- **[docs/INTERACTIVE_MODE.md](docs/INTERACTIVE_MODE.md)** - Complete interactive mode guide
-- **[docs/QUICK_START.md](docs/QUICK_START.md)** - 5-minute getting started guide
-- **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)** - Comprehensive user guide
-
-### Technical Documentation
-
-- **[CLAUDE.md](CLAUDE.md)** - Project overview and development guide
-- **[docs/AUTOGEN_INTEGRATION.md](docs/AUTOGEN_INTEGRATION.md)** - AG2 integration details
-- **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** - Production deployment guide
-- **[road_map.md](road_map.md)** - Development roadmap (6 phases)
-
-### Historical Documentation
-
-- **[docs/archive/](docs/archive/)** - Previous status reports and testing docs
-
-## 🧪 Testing
-
-### Quick Integration Test
-
-Test all three MCP servers (database, processing, and alignment):
-
+**Stop all containers:**
 ```bash
-# Quick standalone test
-python3 test_processing_integration.py
-
-# Expected output:
-# ✓ Connected to MCP servers
-# ✓ Total functions available: 21 (11 database + 5 processing + 5 alignment)
-# ✓ fasta_qc call successful!
+docker compose -f docker-compose.autogen.yml down
 ```
 
-### Comprehensive Test Suite
-
-Run all tests including function calling and individual tool tests:
-
+**View logs:**
 ```bash
-# Complete test suite with 4 test suites:
-# 1. Basic Function Calling
-# 2. Processing MCP Integration
-# 3. Alignment MCP Integration
-# 4. Individual Processing Tools
-python3 test_function_calling.py
-
-# Expected output:
-# ✅ PASS  Basic Function Calling
-# ✅ PASS  Processing MCP Integration
-# ✅ PASS  Alignment MCP Integration
-# ✅ PASS  Individual Processing Tools
-# Overall: 4/4 test suites passed
-```
-
-### Manual Testing
-
-```bash
-# Start the system
-./start_interactive.sh
-
-# Test with example requests
-┌─[qPCR Assistant]
-└─> Get 50 COI sequences for Salmo salar and run quality control
-    with min_length=400 and max_n_percent=5.0
-
-# Test processing workflow
-┌─[qPCR Assistant]
-└─> Retrieve sequences for E. coli, perform QC, and remove duplicates
-
-# Verify task logs
-┌─[qPCR Assistant]
-└─> logs
-```
-
-### Unit Tests
-
-```bash
-# Test database MCP server
-cd mcp_servers/database_server
-python -m pytest tests/ -v
-
-# Test processing MCP server
-cd mcp_servers/processing_server
-python -m pytest tests/ -v
-
-# Test specific tool
-python -m pytest tests/test_fasta_qc.py -v
-```
-
-### Integration Tests
-
-```bash
-# Test MCP bridge communication
-cd autogen_app
-python -m pytest tests/test_mcp_bridge.py -v
-
-# Test agent collaboration
-python -m pytest tests/test_multi_agent.py -v
-```
-
-### MCP Server Testing (Interactive)
-
-```bash
-# Test database server with MCP Inspector
-cd mcp_servers/database_server
-npx @modelcontextprotocol/inspector python3 database_mcp_server.py
-# Open http://localhost:6274
-
-# Test processing server with MCP Inspector
-cd mcp_servers/processing_server
-npx @modelcontextprotocol/inspector python3 processing_mcp_server.py
-# Open http://localhost:6274
-
-# See comprehensive testing guide
-cat docs/MCP_TESTING_GUIDE.md
-```
-
-### Viewing and Downloading Task Logs
-
-Every workflow generates JSON logs and summary files in the container's `/results` directory:
-
-```bash
-# Check container logs
+# View specific container
 docker logs qpcr-assistant
+docker logs ndiag-database-server
 
-# View task execution logs
-docker exec qpcr-assistant ls -lh /results
-
-# Extract statistics from JSON logs
-docker exec qpcr-assistant cat /results/*.json | jq '.statistics'
-
-# Copy all logs to local machine
-docker cp qpcr-assistant:/results ./test_logs
-
-# Download specific summary file
-docker cp qpcr-assistant:/results/task_20251001_212336_summary.txt ./
-
-# Download specific JSON log
-docker cp qpcr-assistant:/results/task_20251001_212336.json ./
-
-# Download all summary files
-docker exec qpcr-assistant sh -c 'cd /results && tar czf summaries.tar.gz *_summary.txt'
-docker cp qpcr-assistant:/results/summaries.tar.gz ./
-tar xzf summaries.tar.gz
-
-# Download all JSON logs
-docker exec qpcr-assistant sh -c 'cd /results && tar czf logs.tar.gz *.json'
-docker cp qpcr-assistant:/results/logs.tar.gz ./
-tar xzf logs.tar.gz
-```
-
-## 🚢 Deployment
-
-### Development Deployment
-
-```bash
-# Use docker-compose for local development
-docker compose -f docker-compose.autogen.yml up -d
-
-# Access logs
+# Follow logs in real-time
 docker logs -f qpcr-assistant
 
-# Interactive session
-docker attach qpcr-assistant
+# View all logs
+docker compose -f docker-compose.autogen.yml logs
 ```
 
-### Production Deployment (Kubernetes)
-
+**Restart with fresh build:**
 ```bash
-# Deploy to Kubernetes
-kubectl apply -f kubernetes/namespace.yaml
-kubectl apply -f kubernetes/database-server.yaml
-kubectl apply -f kubernetes/qpcr-assistant.yaml
-
-# Check status
-kubectl get pods -n ndiag
-
-# View logs
-kubectl logs -f deployment/qpcr-assistant -n ndiag
-
-# Access service
-kubectl port-forward service/qpcr-assistant 8501:8501 -n ndiag
+./start_interactive.sh
+# Choose option 2: Restart with fresh build
 ```
 
-### Environment Configuration
+### Troubleshooting
 
-**Required (choose one or both):**
+**"API key not found" error:**
 ```bash
-GOOGLE_API_KEY=your-key        # Google Gemini API key (recommended)
-OPENAI_API_KEY=sk-...          # OpenAI API key for GPT-4
+# Verify .env file exists and has correct format
+cat autogen_app/.env
+
+# Should show:
+# GOOGLE_API_KEY=your-key-here
+# or
+# OPENAI_API_KEY=sk-your-key-here
+
+# Re-create if needed
+echo "GOOGLE_API_KEY=your-actual-key" > autogen_app/.env
 ```
 
-**Optional:**
+**Container failed to start:**
 ```bash
-NCBI_API_KEY=your-ncbi-key                    # Increases NCBI rate limits
-LOG_LEVEL=INFO                                # DEBUG, INFO, WARNING, ERROR
-MCP_DATABASE_SERVER=ndiag-database-server     # Database server container (Phase 1)
-MCP_PROCESSING_SERVER=ndiag-processing-server # Processing server container (Phase 2)
-MCP_ALIGNMENT_SERVER=ndiag-alignment-server   # Alignment server container (Phase 3)
-MCP_DESIGN_SERVER=ndiag-design-server         # Design server container (Phase 4)
+# Check container status
+docker ps -a | grep ndiag
+
+# View error logs
+docker logs ndiag-database-server
+docker logs qpcr-assistant
+
+# Restart everything
+docker compose -f docker-compose.autogen.yml down
+./start_interactive.sh
 ```
 
-**Getting API Keys:**
-- **Google Gemini**: Get free API key at [Google AI Studio](https://makersuite.google.com/app/apikey)
-- **OpenAI**: Get API key at [OpenAI Platform](https://platform.openai.com/api-keys)
+**Agents not responding:**
+```bash
+# Check API key is valid
+# For Gemini: https://makersuite.google.com/app/apikey
+# For OpenAI: https://platform.openai.com/api-keys
 
-### Scaling Considerations
+# Check rate limits
+# Gemini free tier: 60 requests/minute
+# OpenAI: Depends on your plan
 
-- **MCP Servers**: Stateless, can scale horizontally
-- **AutoGen Agents**: One instance per user session
-- **Database Cache**: Redis/Memcached for sequence caching
-- **Rate Limiting**: NCBI API has rate limits (3 req/sec without key, 10 req/sec with key)
-
-See **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** for complete deployment guide.
-
-## 🏗️ Architecture
-
-### System Overview
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    User Interface                       │
-│         (Interactive Terminal / REST API)               │
-└─────────────────────┬───────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────┐
-│              AutoGen Multi-Agent System                 │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
-│  │ Coordinator  │  │ DatabaseAgent│  │ AnalystAgent │  │
-│  │    Agent     │  │              │  │              │  │
-│  └──────┬───────┘  └──────┬───────┘  └──────────────┘  │
-└─────────┼──────────────────┼──────────────────────────┘
-          │                  │
-          │         ┌────────▼────────┐
-          │         │  MCP Bridge     │
-          │         │  (stdio client) │
-          │         └────────┬────────┘
-          │                  │
-┌─────────▼──────────────────▼────────────────────────────┐
-│                    MCP Servers                          │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
-│  │   Database   │  │  Processing  │  │  Alignment   │  │
-│  │    Server    │  │   Server     │  │   Server     │  │
-│  │  (Phase 1✅) │  │  (Phase 2✅) │  │  (Phase 3)   │  │
-│  └──────┬───────┘  └──────────────┘  └──────────────┘  │
-└─────────┼──────────────────────────────────────────────┘
-          │
-┌─────────▼──────────────────────────────────────────────┐
-│            External Data Sources                       │
-│   NCBI GenBank │ BOLD Systems │ SILVA │ UNITE │ SRA   │
-└────────────────────────────────────────────────────────┘
+# View agent logs
+docker logs qpcr-assistant | grep -i error
 ```
 
-### MCP Server Phases
+---
 
-| Phase | Server | Status | Tools |
-|-------|--------|--------|-------|
-| **Phase 1** | Database | ✅ Complete | get_sequences, get_taxonomy, get_neighbors, extract_sequence_columns, search_sra_studies (5 tools) |
-| **Phase 2** | Processing | ✅ Complete | fasta_qc, dereplicate_sequences, mask_low_complexity, detect_chimeras, process_sequences (5 tools) |
-| **Phase 3** | Alignment | ✅ Complete | align_sequences, process_alignment, build_phylogeny, calculate_distances, align_and_analyze (5 tools) |
-| **Phase 4** | Design | ✅ Complete | find_signature_regions, analyze_specificity, rank_regions, primer3_design, oligo_qc, design_primers_complete (6 tools) |
-| **Phase 5** | Validation | 🚧 Planned | blast_primers, insilico_pcr, search_literature |
-| **Phase 6** | Export | 🚧 Planned | export_results, generate_report, track_provenance |
+## 📚 Available Tools (35 Total)
 
-See **[docs/road_map.md](docs/road_map.md)** for detailed roadmap.
+### Tool Categories
 
-## 📂 Project Structure
+All tools use underscore naming (`category_toolName`):
 
-```
-mdk_mcp/
-├── README.md                           # This file
-├── CLAUDE.md                           # Project overview for Claude Code
-├── start_interactive.sh                # One-command launcher
-├── docker-compose.autogen.yml          # Docker Compose configuration
-│
-├── autogen_app/                        # AG2 application
-│   ├── qpcr_assistant.py               # Main assistant with interactive interface
-│   ├── autogen_mcp_bridge.py           # MCP client bridge for AG2
-│   ├── gemini_client.py                # Gemini model client wrapper
-│   ├── requirements.txt                # Python dependencies
-│   ├── Dockerfile                      # Container definition
-│   ├── .env                            # API keys (create this)
-│   ├── .env.template                   # Template for .env file
-│   └── OAI_CONFIG_LIST.json            # Model configuration (Gemini + GPT-4)
-│
-├── mcp_servers/                        # MCP servers
-│   ├── database_server/                # Phase 1: Database access
-│   │   ├── database_mcp_server.py      # Server implementation
-│   │   ├── config.py                   # Configuration
-│   │   ├── requirements.txt            # Dependencies
-│   │   ├── Dockerfile                  # Container definition
-│   │   ├── mcp-server.json             # MCP manifest
-│   │   └── tests/                      # Unit tests
-│   ├── processing_server/              # Phase 2: Sequence processing
-│   │   ├── processing_mcp_server.py    # Server implementation
-│   │   ├── config.py                   # Configuration
-│   │   ├── requirements.txt            # Dependencies
-│   │   ├── Dockerfile                  # Container definition
-│   │   ├── mcp-server.json             # MCP manifest
-│   │   └── tests/                      # Unit tests
-│   └── [future servers...]
-│
-├── docs/                               # Documentation
-│   ├── INDEX.md                        # Documentation index and navigation
-│   ├── USER_GUIDE.md                   # Comprehensive user reference
-│   ├── AUTOGEN_INTEGRATION.md          # AG2 integration architecture
-│
-├── kubernetes/                         # Kubernetes manifests
-│   ├── namespace.yaml
-│   ├── database-server.yaml
-│   └── qpcr-assistant.yaml
-│
-└── results/                            # Task logs (generated at runtime in container)
-    ├── task_TIMESTAMP.json             # Machine-readable workflow data
-    └── task_TIMESTAMP_summary.txt      # Human-readable reports
-```
+**Database Tools (11)**:
+- `database_getSequences`, `database_getTaxonomy`, `database_ggetRef`
+- `database_ggetSearch`, `database_ggetInfo`, `database_ggetSeq`
+- `database_getNeighbors`, `database_searchSraStudies`
+- `database_getSraRuninfo`, `database_searchSraCloud`, `database_extractSequenceColumns`
+
+**Processing Tools (5)**:
+- `processing_fastaQc`, `processing_dereplicateSequences`, `processing_detectChimeras`
+- `processing_maskLowComplexity`, `processing_processSequences`
+
+**Alignment Tools (5)**:
+- `alignment_alignSequences`, `alignment_buildPhylogeny`, `alignment_processAlignment`
+- `alignment_calculateDistances`, `alignment_alignAndAnalyze`
+
+**Design Tools (6)**:
+- `design_findSignatureRegions`, `design_primer3Design`, `design_analyzeSpecificity`
+- `design_rankRegions`, `design_oligoQc`, `design_designPrimersComplete`
+
+**Validation Tools (7)**:
+- `validation_ggetBlast`, `validation_inSilicoPcr`, `validation_ggetBlat`
+- `validation_blastNt`, `validation_assessCoverage`
+- `validation_searchPubmed`, `validation_validatePrimersComplete`
+
+**Code Execution (1)**:
+- `execute_code` - Run JavaScript/TypeScript code in secure Docker sandbox with access to all MCP tools
+
+### Detailed Tool Documentation
+
+For complete tool descriptions, parameters, and examples, see:
+- **[COMPLETE_TOOL_CATALOG.md](COMPLETE_TOOL_CATALOG.md)** - All 34 bioinformatics tools with testing prompts
+- **[docs/architecture/CODE_EXECUTION_ARCHITECTURE.md](docs/architecture/CODE_EXECUTION_ARCHITECTURE.md)** - Complete code execution architecture explanation
+- **[code-execution/FIX_SUMMARY.md](code-execution/FIX_SUMMARY.md)** - Code execution sandbox setup
+- **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)** - Comprehensive user guide
+
+---
+
+## ✨ What Makes This Special?
+
+### 🧠 Token-Efficient Architecture
+
+Traditional MCP loads all tools upfront (150,000 tokens). This platform uses **progressive tool discovery** - loading only what you need (400 tokens per tool).
+
+**Result:** 99.1% token reduction, 2.5x faster, 95.9% cost savings
+
+From retrieval → QC → alignment → primer design → validation in one workflow.
+
+### 🤖 AI Agent Orchestration (Interactive Mode)
+
+Four specialized agents collaborate automatically:
+- **Coordinator** - Plans workflows
+- **DatabaseAgent** - Retrieves sequences  
+- **AnalystAgent** - QC, alignment, phylogenetics
+- **PrimerDesignAgent** - Primer design & validation
+
+### 🐳 Containerized Deployment
+
+All services run in Docker containers with automatic permission management and health checks.
+
+---
+
+## 📖 Documentation & Support
+
+### 📚 User Guides
+- **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)** - Complete user manual
+- **[COMPLETE_TOOL_CATALOG.md](COMPLETE_TOOL_CATALOG.md)** - All 34 tools with examples
+- **[docs/INTERACTIVE_MODE.md](docs/INTERACTIVE_MODE.md)** - Interactive terminal guide
+- **[docs/QUICK_START.md](docs/QUICK_START.md)** - 5-minute quick start
+
+### 🔧 Technical Documentation
+- **[CLAUDE.md](CLAUDE.md)** - Project overview and development guide
+- **[docs/AUTOGEN_INTEGRATION.md](docs/AUTOGEN_INTEGRATION.md)** - AG2 integration details
+- **[docs/BUILD_SYSTEM.md](docs/BUILD_SYSTEM.md)** - Build system documentation
+- **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** - Production deployment guide
+- **[road_map.md](road_map.md)** - Development roadmap
+
+### 💬 Get Help
+- 📘 Check **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** for common issues
+- 🔍 Search [GitHub Issues](https://github.com/acefgin/mdk_mcp/issues)
+- 🐛 [Open a new issue](https://github.com/acefgin/mdk_mcp/issues/new) with error logs
+
+---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Areas needing help:
+Contributions welcome! See `docs/MIGRATION_EXECUTIVE_SUMMARY.md` for the MCP 2.0 roadmap.
 
-### Phase 5-6 Implementation
-- ✅ ~~Alignment server~~ (COMPLETE - MAFFT/MUSCLE/Clustal Omega, phylogenetics)
-- ✅ ~~Design server~~ (COMPLETE - signature regions, Primer3, oligo QC)
-- Validation server (BLAST, in-silico PCR, literature search)
-- Export server (report generation, provenance tracking)
+**High Priority Areas:**
+- TypeScript server migrations (processing, alignment, design)
+- Skills integration for reusable workflows
+- Web UI development
+- Documentation improvements
 
-### Infrastructure
-- Sequence caching layer (Redis)
-- Rate limiting across distributed instances
-- Web UI (React/Vue frontend)
-- REST API for programmatic access
-
-### Development & Testing
-
-For developers and contributors:
-
-- 📘 **[TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** - Complete troubleshooting guide
-- 🧪 **[MCP_TESTING_GUIDE.md](docs/MCP_TESTING_GUIDE.md)** - MCP server testing guide
-- 📋 **[MCP_TESTING_QUICKREF.md](docs/MCP_TESTING_QUICKREF.md)** - Quick testing reference
-- 📖 **[AUTOGEN_INTEGRATION.md](docs/AUTOGEN_INTEGRATION.md)** - AG2 architecture details
-- 🗺️ **[road_map.md](road_map.md)** - Development roadmap
-
-**Quick Test Commands:**
-```bash
-# Run integration test
-python3 test_processing_integration.py
-
-# Run comprehensive test suite
-python3 test_function_calling.py
-
-# Test MCP servers interactively
-cd mcp_servers/database_server
-npx @modelcontextprotocol/inspector python3 database_mcp_server.py
-```
-
-## 📞 Support & Help
-
-**Having issues?**
-1. 📘 Check **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** for solutions to common problems
-2. 📖 Read the **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)** for detailed usage instructions
-3. 🔍 Search existing [GitHub Issues](https://github.com/acefgin/mdk_mcp/issues)
-4. 🐛 Open a new issue with logs and error messages
-
-**For Developers:**
-- **Claude Code**: See [CLAUDE.md](CLAUDE.md) for AI assistant guidance
-- **Architecture**: Review [docs/AUTOGEN_INTEGRATION.md](docs/AUTOGEN_INTEGRATION.md)
-- **Testing**: See [docs/MCP_TESTING_GUIDE.md](docs/MCP_TESTING_GUIDE.md)
+---
 
 ## 📄 License
 
 MIT License - See [LICENSE](LICENSE) file for details.
 
+---
+
 ## 🙏 Acknowledgments
 
-- **AG2** - Multi-agent framework (formerly Microsoft AutoGen)
-- **Google Gemini** - Large language model with 1M context window
-- **Model Context Protocol (MCP)** - Tool protocol by Anthropic
-- **gget** - Genomic database access library
+### Frameworks
+- **AG2** - Multi-agent framework
+- **MCP** - Model Context Protocol by Anthropic
+- **Google Gemini** - LLM with 1M context window  
+- **Node.js/TypeScript** - Runtime and type system
+
+### Bioinformatics Tools
+- **gget** - Genomic database access
 - **BioPython** - Bioinformatics utilities
-- **seqkit** - Fast FASTA/Q file manipulation toolkit
-- **vsearch** - Sequence clustering, dereplication, and chimera detection
+- **seqkit, vsearch** - Sequence processing
+- **MAFFT, MUSCLE** - Multiple sequence alignment
+- **Primer3** - PCR primer design
+- **NCBI BLAST+** - Sequence validation
 - **NCBI/BOLD/SILVA/UNITE** - Sequence databases
-
-## 🔗 Links
-
-- **GitHub Repository**: https://github.com/acefgin/mdk_mcp
-- **AG2 Documentation**: https://docs.ag2.ai
-- **Google Gemini API**: https://makersuite.google.com/app/apikey
-- **MCP Specification**: https://modelcontextprotocol.io
-- **gget Documentation**: https://github.com/pachterlab/gget
 
 ---
 
-**Ready to design qPCR assays with AI?**
+**Ready to design qPCR assays?**
 
 ```bash
+# Claude Desktop: Follow setup guide above
+# Interactive Terminal:
 ./start_interactive.sh
 ```
 
-🧬 Welcome to the future of molecular diagnostics!
+🧬 Welcome to AI-powered molecular diagnostics!

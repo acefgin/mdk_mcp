@@ -1,0 +1,43 @@
+{
+  "name": "mcp-tools",
+  "version": "1.0.0",
+  "description": "Comprehensive guide for using MCP bioinformatics tools properly, including database source selection, context-efficient patterns, and common workflows",
+  "tags": [
+    "mcp",
+    "bioinformatics",
+    "database",
+    "sequences",
+    "tools",
+    "typescript",
+    "python",
+    "best-practices"
+  ],
+  "triggers": [
+    "database.getSequences",
+    "getSequences",
+    "COI sequences",
+    "mitochondrial genes",
+    "BOLD database",
+    "NCBI",
+    "Ensembl",
+    "code-execution sandbox",
+    "context efficiency",
+    "primer design",
+    "sequence alignment",
+    "BLAST",
+    "phylogenetic analysis"
+  ],
+  "priority": "high",
+  "autoActivate": true,
+  "categories": [
+    "development",
+    "bioinformatics",
+    "api-usage"
+  ],
+  "interfaces": {
+    "typescript": "workspace/servers/",
+    "sandbox": "code-execution/",
+    "documentation": "docs/architecture/INTERFACE_ARCHITECTURE_SUMMARY.md"
+  }
+}
+
