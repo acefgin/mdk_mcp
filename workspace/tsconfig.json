@@ -1,0 +1,27 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "./lib",
+    "outDir": "./lib",
+    "declarationDir": "./lib",
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true
+  },
+  "include": [
+    "lib/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "lib/**/*.test.ts",
+    "lib/**/*.spec.ts",
+    "servers/**/*"
+  ],
+  "references": [
+    {
+      "path": "../mcp_servers/shared"
+    }
+  ]
+}
+

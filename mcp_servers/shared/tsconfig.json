@@ -1,32 +1,19 @@
 {
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2022",
-    "module": "ES2022",
-    "lib": ["ES2022"],
-    "moduleResolution": "node",
-    "rootDir": ".",
-    "outDir": "../../workspace",
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true
+    "rootDir": "./ts_src",
+    "outDir": "./dist",
+    "composite": true,
+    "declarationMap": true
   },
   "include": [
-    "*.ts",
-    "tests/**/*.ts"
+    "ts_src/**/*"
   ],
   "exclude": [
     "node_modules",
+    "dist",
+    "tests",
     "**/*.test.ts",
-    "**/*.d.ts"
+    "**/*.spec.ts"
   ]
 }

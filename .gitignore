@@ -1,27 +1,168 @@
-.env
-results/
-__pycache__/
-mcp_servers/database_server/__pycache__/
-*.md
-!README.md
-!CLAUDE.md
-!docs/**/*.md
-!.claude/**/*.md
-.mcp.json
-.mcp.local.json
-.mcp.json.backup
-node_modules/
-workspace/
-logs/
-tmp/
+# TypeScript Build Artifacts
+# Ignore all compiled JavaScript and build outputs by default
+*.js
+*.js.map
+*.d.ts
+*.d.ts.map
+*.tsbuildinfo
+
+# But KEEP essential JavaScript files needed for operation
+!jest.config.js
+!vitest.config.js
+!workspace/mcp-server.js
+
+# KEEP TypeScript source files (these are what we track in git)
+!**/*.ts
+!**/*.tsx
+
+# Build output directories (always ignore)
+dist/
+build/
+out/
+
+# Shared infrastructure - ignore compiled output in dist/
+mcp_servers/shared/dist/
+
+# Workspace library - ignore compiled JS (TypeScript .ts files are tracked)
+workspace/lib/**/*.js
+workspace/lib/**/*.js.map
+workspace/lib/**/*.d.ts
+workspace/lib/**/*.d.ts.map
+
+# Generated tool wrappers - IGNORE (auto-generated, not source)
+workspace/servers/
+!workspace/servers/.gitkeep
+
+# Code execution - ignore compiled output
 code-execution/dist/
 
-# Test output directories
-test-output/
-test-output-*/
-test-migration-output/
+# Dependencies
+node_modules/
+package-lock.json
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
 
-# Test output directories (for inspection)
-test-output/
-test-output-*/
-test-migration-output/
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Python virtual environments
+venv/
+env/
+ENV/
+.venv
+.virtualenv
+
+# Python type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+
+# Python testing
+.pytest_cache/
+.tox/
+
+# KEEP all Python source files (these are tracked)
+!**/*.py
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.nyc_output
+coverage/
+*.cover
+*.log
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.iml
+.project
+.classpath
+.settings/
+
+# Environment
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Results and Data
+results/*
+!results/.gitkeep
+data/*
+!data/.gitkeep
+temp/*
+!temp/.gitkeep
+
+# Docker
+docker-compose.override.yml
+.dockerignore
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.old
+*.swp
+*.swo
+*~
+
+# Backup files from reorganization
+backup-*.tar.gz
+build.log
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+pnpm-debug.log*
+
+# Build output
+out/
+build/
+
+# Cache
+.cache/
+.npm/
+.eslintcache
+.node_repl_history
+
+# Optional
+.tscache/

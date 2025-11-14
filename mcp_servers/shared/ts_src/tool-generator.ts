@@ -54,7 +54,8 @@ export class ToolFileGenerator {
   async copyBaseFiles(outputDir: string): Promise<void> {
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = dirname(__filename);
-    const sharedDir = __dirname;
+    // When running from dist, go up to shared dir then into ts_src
+    const sharedDir = join(__dirname, "..", "ts_src");
 
     // Create lib directory
     const libDir = join(outputDir, "lib");

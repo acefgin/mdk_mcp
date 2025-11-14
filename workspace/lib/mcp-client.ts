@@ -295,7 +295,11 @@ export class MCPClient {
       }
 
       // Second JSON line is the tool result
-      const toolResponse = JSON.parse(jsonLines[1]);
+      const toolResponseLine = jsonLines[1];
+      if (!toolResponseLine) {
+        throw new Error('Missing tool response in JSON output');
+      }
+      const toolResponse = JSON.parse(toolResponseLine);
 
       if (toolResponse.error) {
         throw new Error(toolResponse.error.message || 'Tool execution failed');
@@ -378,7 +382,11 @@ export class MCPClient {
         throw new Error(`Expected 2 JSON responses, got ${jsonLines.length}. Output: ${stdout.substring(0, 500)}`);
       }
 
-      const listResponse = JSON.parse(jsonLines[1]);
+      const listResponseLine = jsonLines[1];
+      if (!listResponseLine) {
+        throw new Error('Missing list response in JSON output');
+      }
+      const listResponse = JSON.parse(listResponseLine);
 
       if (listResponse.error) {
         throw new Error(listResponse.error.message || 'Failed to list tools');

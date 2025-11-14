@@ -143,7 +143,8 @@ export async function filterAndSave(
 
   for (const entry of entries) {
     const lines = entry.split('\n');
-    const header = lines[0].replace(/^>/, '');
+    if (lines.length === 0) continue;
+    const header = lines[0]!.replace(/^>/, '');
     const sequence = lines.slice(1).join('').toUpperCase();
 
     if (filter(sequence, header)) {
@@ -199,7 +200,8 @@ export function extractFields(
 
   for (const entry of entries) {
     const lines = entry.split('\n');
-    const header = lines[0].replace(/^>/, '');
+    if (lines.length === 0) continue;
+    const header = lines[0]!.replace(/^>/, '');
 
     const record: Record<string, string> = {};
 
@@ -214,7 +216,7 @@ export function extractFields(
       let value = '';
       for (const pattern of patterns) {
         const match = header.match(pattern);
-        if (match) {
+        if (match && match[1]) {
           value = match[1];
           break;
         }
@@ -263,6 +265,16 @@ export function summarizeAlignment(alignmentContent: string): {
     return lines.slice(1).join('').toUpperCase();
   });
 
+  if (sequences.length === 0 || !sequences[0]) {
+    return {
+      sequences: 0,
+      length: 0,
+      gapPercentage: 0,
+      conservationScore: 0,
+      identityMatrix: [],
+    };
+  }
+
   const alignmentLength = sequences[0].length;
   let totalGaps = 0;
 
@@ -293,6 +305,7 @@ export function summarizeAlignment(alignmentContent: string): {
       } else {
         const seq1 = sequences[i];
         const seq2 = sequences[j];
+        if (!seq1 || !seq2) continue;
         let matches = 0;
         let compared = 0;
 

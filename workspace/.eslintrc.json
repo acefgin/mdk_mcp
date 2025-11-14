@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json.schemafile.org/eslintrc",
+  "parserOptions": {
+    "ecmaVersion": 2022,
+    "sourceType": "script"
+  },
+  "env": {
+    "es2022": true,
+    "node": false
+  },
+  "globals": {
+    "database": "readonly",
+    "processing": "readonly",
+    "alignment": "readonly",
+    "design": "readonly",
+    "validation": "readonly",
+    "parseFastaStats": "readonly",
+    "filterAndSave": "readonly",
+    "extractFields": "readonly",
+    "summarizeAlignment": "readonly",
+    "batchProcess": "readonly",
+    "cacheResult": "readonly",
+    "getCachedResult": "readonly",
+    "saveToFile": "readonly",
+    "formatBytes": "readonly",
+    "truncateForContext": "readonly",
+    "cleanupFiles": "readonly",
+    "fs": "readonly",
+    "path": "readonly",
+    "crypto": "readonly",
+    "console": "readonly",
+    "Promise": "readonly",
+    "setTimeout": "readonly",
+    "setInterval": "readonly",
+    "clearTimeout": "readonly",
+    "clearInterval": "readonly"
+  },
+  "rules": {
+    "no-restricted-syntax": [
+      "error",
+      {
+        "selector": "ImportDeclaration",
+        "message": "❌ SANDBOX ERROR: Do not use 'import' statements. MCP tool modules are pre-loaded as globals (database, processing, alignment, design, validation). Use them directly without importing."
+      },
+      {
+        "selector": "CallExpression[callee.name='require']",
+        "message": "❌ SANDBOX ERROR: Do not use 'require()' for MCP tools. They are pre-loaded as globals. Only whitelisted Node.js modules (fs, path, crypto) can be required, but they are also available as globals."
+      },
+      {
+        "selector": "AwaitExpression > ImportExpression",
+        "message": "❌ SANDBOX ERROR: Dynamic imports (await import()) are not supported in the sandbox. MCP tools are available as pre-loaded globals."
+      }
+    ],
+    "no-undef": [
+      "error",
+      {
+        "typeof": false
+      }
+    ],
+    "no-eval": "error",
+    "no-implied-eval": "error",
+    "no-new-func": "error"
+  },
+  "overrides": [
+    {
+      "files": ["*.ts", "*.tsx"],
+      "parser": "@typescript-eslint/parser",
+      "parserOptions": {
+        "ecmaVersion": 2022,
+        "sourceType": "script"
+      },
+      "rules": {
+        "@typescript-eslint/no-var-requires": "error",
+        "@typescript-eslint/triple-slash-reference": [
+          "warn",
+          {
+            "path": "always",
+            "types": "prefer-import",
+            "lib": "prefer-import"
+          }
+        ]
+      }
+    }
+  ]
+}
+

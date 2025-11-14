@@ -5,7 +5,8 @@
   "main": "dist/executor.js",
   "type": "module",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp src/helpers.js src/helpers.d.ts dist/",
+    "clean": "rm -rf dist",
     "start": "node dist/executor.js",
     "dev": "tsx src/executor.ts",
     "test": "vitest run",

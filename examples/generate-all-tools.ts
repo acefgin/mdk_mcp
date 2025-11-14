@@ -14,7 +14,7 @@
  * ```
  */
 
-import { ToolFileGenerator, ToolDefinition } from '../mcp_servers/shared/tool-generator.js';
+import { ToolFileGenerator, ToolDefinition } from '../mcp_servers/shared/dist/tool-generator.js';
 
 // Import tool definitions
 import { databaseTools } from './generate-database-tools.js';
