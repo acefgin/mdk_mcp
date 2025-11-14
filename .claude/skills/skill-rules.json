@@ -430,6 +430,77 @@
                     "@pytest\\.mark"
                 ]
             }
+        },
+        "mcp-tools-usage": {
+            "type": "domain",
+            "enforcement": "suggest",
+            "priority": "critical",
+            "description": "Comprehensive guide for using MCP bioinformatics tools properly - CRITICAL for correct database source selection (NCBI/BOLD for mitochondrial genes, not Ensembl)",
+            "promptTriggers": {
+                "keywords": [
+                    "database.getSequences",
+                    "getSequences",
+                    "COI",
+                    "mitochondrial",
+                    "BOLD",
+                    "NCBI",
+                    "Ensembl",
+                    "gget",
+                    "source parameter",
+                    "code-execution sandbox",
+                    "context efficiency",
+                    "sequence retrieval",
+                    "database source",
+                    "helper functions",
+                    "parseFastaStats",
+                    "saveToFile",
+                    "extractFields",
+                    "docs object",
+                    "16S",
+                    "ITS",
+                    "SILVA",
+                    "UNITE",
+                    "primer design workflow",
+                    "phylogenetic workflow",
+                    "extractSequenceColumns"
+                ],
+                "intentPatterns": [
+                    "(get|retrieve|fetch|download).*?(sequence|COI|16S|ITS)",
+                    "(use|call|execute).*?database\\.getSequences",
+                    "(use|call).*?(NCBI|BOLD|Ensembl|SILVA|UNITE)",
+                    "(which|what).*?(database|source).*?(use|should)",
+                    "(context|token).*?(efficiency|optimization|reduction)",
+                    "(helper function|parseFasta|saveToFile|extractFields)",
+                    "(design|find|create).*?primer",
+                    "(align|phylogen|tree|distance).*?sequence",
+                    "(BLAST|in.*?silico.*?PCR|validate).*?primer",
+                    "(how to|best practice).*?(MCP tool|database tool|sequence tool)"
+                ]
+            },
+            "fileTriggers": {
+                "pathPatterns": [
+                    "workspace/servers/**/*.ts",
+                    "workspace/servers/**/*.js",
+                    "code-execution/src/**/*.ts",
+                    "code-execution/src/**/*.js",
+                    "**/mcp-server.ts",
+                    "**/mcp-server.js"
+                ],
+                "contentPatterns": [
+                    "database\\.getSequences",
+                    "parseFastaStats",
+                    "saveToFile",
+                    "extractFields",
+                    "docs\\.",
+                    "await database\\.",
+                    "await processing\\.",
+                    "await alignment\\.",
+                    "await design\\.",
+                    "await validation\\.",
+                    "callMCPTool",
+                    "executeCode"
+                ]
+            }
         }
     },
     "notes": {

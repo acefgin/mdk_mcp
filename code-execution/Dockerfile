@@ -4,8 +4,8 @@ FROM node:20-alpine AS builder
 
 WORKDIR /build
 
-# Copy package files
-COPY package.json package-lock.json* ./
+# Copy package files from code-execution directory
+COPY code-execution/package.json code-execution/package-lock.json* ./
 
 # Install dependencies
 RUN npm ci --only=production
@@ -39,11 +39,17 @@ WORKDIR /app
 # Copy node_modules from builder
 COPY --from=builder /build/node_modules ./node_modules
 
-# Copy application code
-COPY --chown=sandbox:sandbox . .
+# Copy application code from code-execution directory
+COPY --chown=sandbox:sandbox code-execution/ .
 
 # Create TypeScript build
 RUN npm run build 2>/dev/null || echo "No build script defined"
+
+# Copy workspace scripts (MCP tool modules, libraries, and types)
+# These are now packaged into the image instead of being mounted at runtime
+COPY --chown=sandbox:sandbox workspace/servers /workspace/servers
+COPY --chown=sandbox:sandbox workspace/lib /workspace/lib
+COPY --chown=sandbox:sandbox workspace/types /workspace/types
 
 # Switch to non-root user
 USER sandbox

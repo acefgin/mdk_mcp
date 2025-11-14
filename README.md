@@ -74,28 +74,55 @@ npm run build
 - Main MCP server for Claude Desktop
 - Helper utilities and modules
 
-#### 3. Build Code Execution Sandbox & Start Docker Containers
+#### 3. Build Code Execution Sandbox Container
+
+**Important:** The code-execution-sandbox packages workspace scripts directly into the image, so it must be built AFTER the TypeScript workspace is compiled.
 
 ```bash
-# First, build the code execution sandbox
-cd code-execution
-npm install
-npm run build
-docker build -t code-execution-sandbox .
-cd ..
+# Build the container image (packages workspace scripts inside)
+docker build -f code-execution/Dockerfile -t code-execution-sandbox .
 
-# Then start all MCP server containers
-npm run docker:up
-
-# Wait 30 seconds for containers to initialize
-# Expected output: 7 containers running
+# Expected output:
+# Successfully built code-execution-sandbox
+# Container includes: /workspace/servers, /workspace/lib, /workspace/types
 ```
 
-**Verify containers are running:**
+#### 4. Start MCP Server Containers
+
+**⚠️ CRITICAL:** The code-execution-sandbox needs these MCP server containers to execute tool calls (database, processing, alignment, design, validation). They MUST be running!
+
+```bash
+# Start all MCP server containers
+npm run docker:up
+
+# Wait 10-15 seconds for initialization
+```
+
+**Why are these containers needed?**
+- The code-execution-sandbox communicates with MCP servers via Docker
+- Each tool call (database.getSequences, processing.fastaQc, etc.) runs in its respective container
+- Without these containers, code execution will fail with "Cannot connect to Docker daemon"
+
+**Verify code-execution-sandbox is ready:**
+```bash
+# Test the container
+docker run --rm -i --name test-code-exec \
+  -e EXECUTION_TIMEOUT=30000 \
+  -e MAX_OUTPUT_SIZE=1048576 \
+  -e WORKSPACE_PATH=/workspace \
+  code-execution-sandbox
+
+# Expected output (press Ctrl+C after seeing):
+# Starting Code Execution Sandbox...
+# Loaded MCP servers: alignment, database, design, processing, validation
+# Code Execution Sandbox ready
+```
+
+**If you started all containers, verify they're running:**
 ```bash
 docker ps --format "table {{.Names}}\t{{.Status}}"
 
-# Should show:
+# Should show (if using docker:up):
 # code-execution-sandbox    Up (healthy)
 # ndiag-validation-server   Up (healthy)  
 # ndiag-design-server       Up
@@ -105,18 +132,18 @@ docker ps --format "table {{.Names}}\t{{.Status}}"
 # qpcr-assistant            Up
 ```
 
-#### 4. Configure Claude Desktop
+#### 5. Configure Claude Desktop
 
 **Windows (WSL2):**
 
 1. Press `Win + R`, type `%APPDATA%\Claude`, press Enter
 2. Open or create `claude_desktop_config.json`
-3. Add this configuration (replace `YOUR_USERNAME` with your WSL username and update the path):
+3. Add this configuration (replace `YOUR_USERNAME` with your WSL username):
 
 ```json
 {
   "mcpServers": {
-    "mdk-bioinformatics": {
+    "mdk-ts-mcp": {
       "command": "wsl",
       "args": [
         "-e",
@@ -134,22 +161,27 @@ docker ps --format "table {{.Names}}\t{{.Status}}"
         "-e",
         "bash",
         "-c",
-        "docker run --rm -i --name code-execution-sandbox --mount type=bind,source=/home/YOUR_USERNAME/mdk_mcp/workspace,target=/workspace -e EXECUTION_TIMEOUT=30000 -e MAX_OUTPUT_SIZE=1048576 -e WORKSPACE_PATH=/workspace code-execution-sandbox"
+        "docker run --rm -i --name code-execution-sandbox --mount type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock -e EXECUTION_TIMEOUT=30000 -e MAX_OUTPUT_SIZE=1048576 -e WORKSPACE_PATH=/workspace code-execution-sandbox"
       ]
     }
   }
 }
 ```
 
+**⚠️ Important Notes:**
+- **No workspace mount needed** - Scripts are now packaged in the container image
+- **Docker socket mount required** - Enables communication with MCP server containers
+- Container is self-contained and portable
+
 **macOS/Linux:**
 
 1. Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `~/.config/Claude/claude_desktop_config.json` (Linux)
-2. Add this configuration (replace with your actual paths):
+2. Add this configuration (replace with your actual path):
 
 ```json
 {
   "mcpServers": {
-    "mdk-bioinformatics": {
+    "mdk-ts-mcp": {
       "command": "node",
       "args": [
         "/absolute/path/to/mdk_mcp/workspace/mcp-server.js"
@@ -165,7 +197,7 @@ docker ps --format "table {{.Names}}\t{{.Status}}"
         "--rm",
         "-i",
         "--name", "code-execution-sandbox",
-        "--mount", "type=bind,source=/absolute/path/to/mdk_mcp/workspace,target=/workspace",
+        "--mount", "type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock",
         "-e", "EXECUTION_TIMEOUT=30000",
         "-e", "MAX_OUTPUT_SIZE=1048576",
         "-e", "WORKSPACE_PATH=/workspace",
@@ -176,13 +208,18 @@ docker ps --format "table {{.Names}}\t{{.Status}}"
 }
 ```
 
-#### 5. Restart Claude Desktop
+**⚠️ Important Notes:**
+- **No workspace mount needed** - Scripts are now packaged in the container image
+- **Docker socket mount required** - Enables communication with MCP server containers
+- Container is self-contained and portable
+
+#### 6. Restart Claude Desktop
 
 - Quit Claude Desktop completely
 - Start Claude Desktop again
 - Look for the 🔌 icon in the bottom-right corner
 
-#### 6. Test the Connection
+#### 7. Test the Connection
 
 In Claude Desktop, try:
 
@@ -318,18 +355,33 @@ docker build -t code-execution-sandbox .
 # Verify code-execution-sandbox image exists
 docker images | grep code-execution-sandbox
 
-# Build the image if missing
-cd code-execution
-npm install
-npm run build
-docker build -t code-execution-sandbox .
+# If missing or outdated, rebuild (from project root):
+# 1. First ensure workspace is built
+npm run build:workspace
 
-# Test manually
+# 2. Then rebuild container with packaged scripts
+docker build -f code-execution/Dockerfile -t code-execution-sandbox .
+
+# Test manually (no mount needed - scripts are inside)
 docker run --rm -i --name test-exec \
-  --mount type=bind,source=/home/YOUR_USERNAME/mdk_mcp/workspace,target=/workspace \
   -e WORKSPACE_PATH=/workspace \
   code-execution-sandbox
+# Expected: "Loaded MCP servers: alignment, database, design, processing, validation"
 # Press Ctrl+C after seeing "Code Execution Sandbox ready"
+```
+
+**After updating workspace scripts:**
+```bash
+# When you modify workspace TypeScript files, rebuild:
+cd /home/cxl/MDK_Design/mdk_mcp
+
+# 1. Rebuild TypeScript
+npm run build:workspace
+
+# 2. Rebuild container image (packages new scripts)
+docker build -f code-execution/Dockerfile -t code-execution-sandbox .
+
+# 3. Restart Claude Desktop to use new image
 ```
 
 ---

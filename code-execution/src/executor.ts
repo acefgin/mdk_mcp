@@ -22,6 +22,7 @@ import vm from 'vm';
 import { promises as fs } from 'fs';
 import path from 'path';
 import * as helpers from './helpers.js';
+import * as docs from './docs.js';
 
 // Configuration from environment
 const EXECUTION_TIMEOUT = parseInt(process.env.EXECUTION_TIMEOUT || '30000', 10);
@@ -107,6 +108,8 @@ function createExecutionContext(): ExecutionContext {
     path,
     // Helper functions for context-efficient operations
     ...helpers,
+    // Documentation for all MCP tools
+    docs: docs.default,
   };
 }
 
@@ -269,37 +272,56 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 
 The code execution sandbox provides:
 - Access to all MCP tool modules (database, processing, alignment, design, validation)
+- Comprehensive documentation via 'docs' object
+- Helper functions for context-efficient operations
 - Secure isolated environment with resource limits
 - Timeout enforcement (default ${EXECUTION_TIMEOUT}ms)
 - Output size limits (${MAX_OUTPUT_SIZE} bytes)
 - Console logging support
 - File system access to /workspace
 
+📚 DOCUMENTATION:
+Access docs.quickStart for common workflows and database source selection guide.
+Use docs.database, docs.processing, etc. for detailed function documentation.
+
 Example usage:
 \`\`\`typescript
-// Import MCP tools
+// 1. Get help on available functions
+console.log(docs.quickStart);  // Shows common workflows
+console.log(docs.database.functions.getSequences.usage);
+
+// 2. Get COI sequences (MITOCHONDRIAL gene - use NCBI or BOLD!)
 const sequences = await database.getSequences({
   taxon: "Salmo salar",
   region: "COI",
-  max_results: 100
+  source: "ncbi",        // ← CRITICAL: Use "ncbi" or "bold" for mitochondrial COI
+  max_results: 100,
+  format: "fasta"
 });
 
-// Process data in-code (keeps data out of context)
-const filtered = sequences.split('\\n>')
-  .filter(seq => seq.length > 500)
-  .slice(0, 10);
+// 3. Process data in-code (keeps data out of context)
+const stats = parseFastaStats(sequences);  // Helper function
+// Returns: { count: 100, averageLength: 658, gcContent: 45.2, ... }
 
-// Return only summary
-return {
-  total: filtered.length,
-  averageLength: filtered.reduce((sum, s) => sum + s.length, 0) / filtered.length
-};
+// 4. Or save to file and return metadata only
+const metadata = await saveToFile(sequences, 'coi_sequences.fasta');
+// Returns: { path: '/workspace/data/...', size: 65432, lines: 200, ... }
+
+// 5. Extract specific metadata
+const accessions = extractFields(sequences, ['accession', 'organism']);
 \`\`\`
 
+⚡ CONTEXT EFFICIENCY:
 This approach achieves 99%+ token reduction by:
-1. Loading only the tools you need
+1. Using helper functions (parseFastaStats, saveToFile, extractFields)
 2. Processing data in the execution environment
-3. Returning only summaries/results (not raw data)`,
+3. Returning only summaries/metadata (not raw data)
+
+🗄️ DATABASE SOURCE GUIDE:
+- COI (mitochondrial): source="ncbi" or source="bold"
+- 16S rRNA (bacterial): source="silva"
+- ITS (fungal): source="unite"
+- Nuclear genes: source="gget" (Ensembl)`,
       inputSchema: {
         type: 'object',
         properties: {

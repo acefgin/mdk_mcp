@@ -11,7 +11,7 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, McpError, ErrorCode, } from '@modelcontextprotocol/sdk/types.js';
-import { checkContainers } from './mcp-client.js';
+import { checkContainers } from './lib/mcp-client.js';
 /**
  * Tool definitions for all 34 tools across 5 servers
  */

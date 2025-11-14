@@ -135,7 +135,9 @@ services:
   # ========================================
 
   code-execution-sandbox:
-    build: ./code-execution
+    build:
+      context: .
+      dockerfile: ./code-execution/Dockerfile
     container_name: code-execution-sandbox
     stdin_open: true  # Required for MCP stdio protocol
     tty: false
@@ -150,10 +152,7 @@ services:
       - workspace_data:/workspace/data
       - workspace_cache:/workspace/cache
       - workspace_results:/workspace/results
-      - ./workspace/servers:/workspace/servers:ro  # Read-only access to tool modules
-      - ./workspace/lib:/workspace/lib:ro  # MCP client library
-      - ./workspace/helpers.js:/workspace/helpers.js:ro  # Helper functions
-      - ./workspace/helpers.js.map:/workspace/helpers.js.map:ro  # Source map
+      # Workspace scripts (servers, lib, helpers) are now packaged in the container image
       - ./mcp_servers:/app/mcp_servers:ro  # Read-only access to shared utilities
       - ./results:/results  # Shared results directory
       - /var/run/docker.sock:/var/run/docker.sock  # Docker socket for MCP tool communication
