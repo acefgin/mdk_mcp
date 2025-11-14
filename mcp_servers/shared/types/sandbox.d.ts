@@ -25,15 +25,62 @@
 
 declare const database: {
   /**
-   * Retrieve DNA sequences from the database
-   * @param args Query parameters
-   * @returns FASTA-formatted sequences
+   * Retrieve DNA sequences from the database with advanced filtering
+   * @param args Query parameters including optional filters
+   * @returns FASTA or GenBank-formatted sequences
+   * 
+   * @example Basic usage
+   * ```typescript
+   * const seqs = await database.getSequences({
+   *   taxon: "Salmo salar",
+   *   region: "COI",
+   *   max_results: 10
+   * });
+   * ```
+   * 
+   * @example With filters
+   * ```typescript
+   * const filtered = await database.getSequences({
+   *   taxon: "Salmo salar",
+   *   region: "COI",
+   *   max_results: 50,
+   *   filters: {
+   *     min_length: 600,
+   *     max_length: 700,
+   *     completeness: "complete",
+   *     country: "Norway"
+   *   }
+   * });
+   * ```
    */
   getSequences(args: {
     taxon: string;
-    region: string;
+    region?: "COI" | "16S" | "ITS" | "mitogenome" | "whole";
+    source?: "gget" | "ncbi" | "bold" | "silva" | "unite";
     max_results?: number;
-    include_metadata?: boolean;
+    format?: "fasta" | "genbank";
+    filters?: {
+      /** Minimum sequence length in base pairs */
+      min_length?: number;
+      /** Maximum sequence length in base pairs */
+      max_length?: number;
+      /** Sequence completeness level */
+      completeness?: "complete" | "partial" | "any";
+      /** Start date for upload/submission (YYYY-MM-DD) */
+      upload_date_start?: string;
+      /** End date for upload/submission (YYYY-MM-DD) */
+      upload_date_end?: string;
+      /** Filter by country/geographic location */
+      country?: string;
+      /** Only include sequences with geographic location data */
+      has_geo_location?: boolean;
+      /** Sequence quality threshold */
+      quality_filter?: "high" | "medium" | "any";
+      /** Exclude predicted/inferred sequences */
+      exclude_predicted?: boolean;
+      /** Exclude environmental/uncultured samples */
+      exclude_environmental?: boolean;
+    };
   }): Promise<string>;
 
   /**
