@@ -17,11 +17,12 @@ FROM node:20-alpine
 RUN addgroup -g 1001 -S sandbox && \
     adduser -u 1001 -S sandbox -G sandbox
 
-# Install security tools, minimal utilities, and Docker CLI for MCP communication
+# Install security tools, minimal utilities, Docker CLI, and su-exec for privilege dropping
 RUN apk add --no-cache \
     dumb-init \
     tini \
     docker-cli \
+    su-exec \
     && rm -rf /var/cache/apk/*
 
 # Create docker group with same GID as host (110) and add sandbox user to it
@@ -51,8 +52,11 @@ COPY --chown=sandbox:sandbox workspace/servers /workspace/servers
 COPY --chown=sandbox:sandbox workspace/lib /workspace/lib
 COPY --chown=sandbox:sandbox workspace/types /workspace/types
 
-# Switch to non-root user
-USER sandbox
+# Copy entrypoint script (as root, make executable)
+COPY code-execution/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Don't switch to non-root user yet - entrypoint will do it after fixing permissions
 
 # Set resource limits via env vars (enforced by Docker)
 ENV NODE_OPTIONS="--max-old-space-size=512"
@@ -63,8 +67,9 @@ ENV MAX_OUTPUT_SIZE="1048576"
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD node -e "console.log('healthy')" || exit 1
 
-# Use tini as init system to handle signals properly
-ENTRYPOINT ["/sbin/tini", "--"]
+# Use entrypoint script to fix permissions and drop privileges
+# Tini handles signal forwarding
+ENTRYPOINT ["/sbin/tini", "--", "/entrypoint.sh"]
 
-# Start the executor service
-CMD ["node", "dist/executor.js"]
+# Start the executor service (entrypoint will run this as sandbox user)
+CMD []

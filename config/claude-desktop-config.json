@@ -18,7 +18,7 @@
         "-e",
         "bash",
         "-c",
-        "docker run --rm -i --name code-execution-sandbox --mount type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock -e EXECUTION_TIMEOUT=30000 -e MAX_OUTPUT_SIZE=1048576 -e WORKSPACE_PATH=/workspace code-execution-sandbox"
+        "docker exec -i code-execution-sandbox node /app/dist/executor.js"
       ]
     }
   }

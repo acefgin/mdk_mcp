@@ -149,12 +149,11 @@ services:
       - WORKSPACE_PATH=/workspace
       - NODE_ENV=production
     volumes:
-      - workspace_data:/workspace/data
+      - ./results:/workspace/data  # Mount host results to workspace data for bidirectional access
       - workspace_cache:/workspace/cache
       - workspace_results:/workspace/results
       # Workspace scripts (servers, lib, helpers) are now packaged in the container image
       - ./mcp_servers:/app/mcp_servers:ro  # Read-only access to shared utilities
-      - ./results:/results  # Shared results directory
       - /var/run/docker.sock:/var/run/docker.sock  # Docker socket for MCP tool communication
     restart: unless-stopped
     security_opt:
@@ -163,6 +162,10 @@ services:
       - ALL
     cap_add:
       - NET_BIND_SERVICE
+      - SETUID
+      - SETGID
+      - CHOWN
+      - DAC_OVERRIDE
     mem_limit: 512m
     cpus: 1.0
     pids_limit: 100

@@ -172,20 +172,101 @@ describe('Code Execution Sandbox', () => {
       expect(result.error).toContain('Async error');
     });
   });
+
+  describe('Filesystem Operations', () => {
+    it('should copy file to workspace with relative path', async () => {
+      const result = await callTool('copy_file_to_workspace', {
+        source_path: '/tmp/test_input.txt',
+        destination_path: 'input/test.txt'
+      });
+
+      expect(result.success).toBeDefined();
+      if (result.success) {
+        expect(result.path).toContain('/workspace/input/test.txt');
+      }
+    });
+
+    it('should copy file to workspace with absolute path', async () => {
+      const result = await callTool('copy_file_to_workspace', {
+        source_path: '/tmp/test_input.txt',
+        destination_path: '/workspace/input/test_absolute.txt'
+      });
+
+      expect(result.success).toBeDefined();
+      if (result.success) {
+        expect(result.path).toBe('/workspace/input/test_absolute.txt');
+      }
+    });
+
+    it('should copy file from workspace to local', async () => {
+      // First create a file in workspace
+      const createCode = `
+        await fs.writeFile('/workspace/output/test_export.txt', 'export test', 'utf-8');
+        return { created: true };
+      `;
+      await executeCode(createCode);
+
+      // Then copy it out
+      const result = await callTool('copy_file_from_workspace', {
+        workspace_path: 'output/test_export.txt',
+        destination_path: '/tmp/test_output.txt'
+      });
+
+      expect(result.success).toBeDefined();
+      if (result.success) {
+        expect(result.path).toBe('/tmp/test_output.txt');
+        expect(result.size).toBeGreaterThan(0);
+      }
+    });
+
+    it('should handle missing source file gracefully', async () => {
+      const result = await callTool('copy_file_to_workspace', {
+        source_path: '/tmp/nonexistent_file.txt',
+        destination_path: 'input/test.txt'
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+    });
+
+    it('should create destination directories automatically', async () => {
+      const result = await callTool('copy_file_to_workspace', {
+        source_path: '/tmp/test_input.txt',
+        destination_path: 'deep/nested/path/test.txt'
+      });
+
+      expect(result.success).toBeDefined();
+      if (result.success) {
+        expect(result.path).toContain('deep/nested/path/test.txt');
+      }
+    });
+
+    it('should validate required parameters', async () => {
+      const result = await callTool('copy_file_to_workspace', {
+        source_path: '/tmp/test.txt'
+        // missing destination_path
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+    });
+  });
 });
 
 // Helper function to execute code via MCP protocol
 async function executeCode(code: string, timeout: number = 30000): Promise<any> {
+  return callTool('execute_code', { code, timeout });
+}
+
+// Generic helper to call any MCP tool
+async function callTool(toolName: string, args: any, timeout: number = 30000): Promise<any> {
   const request = JSON.stringify({
     jsonrpc: '2.0',
     id: 1,
     method: 'tools/call',
     params: {
-      name: 'execute_code',
-      arguments: {
-        code,
-        timeout,
-      },
+      name: toolName,
+      arguments: args,
     },
   });
 

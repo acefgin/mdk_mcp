@@ -306,6 +306,65 @@ const pcrResults = await validation.inSilicoPcr({
 };
 
 /**
+ * Filesystem Operations Documentation
+ */
+export const filesystem = {
+  name: "Filesystem Operations",
+  description: "Copy files between local filesystem and container workspace",
+  
+  functions: {
+    copyToWorkspace: {
+      description: "Copy a file from local filesystem into container workspace",
+      usage: `
+// Copy input data into workspace for processing
+await fs.copyFile(
+  "/home/user/data/sequences.fasta",
+  "/workspace/input/sequences.fasta"
+);
+
+// Or use relative path (resolved relative to /workspace)
+await fs.copyFile(
+  "/home/user/config.json",
+  "config/settings.json"  // → /workspace/config/settings.json
+);
+`,
+      useCases: [
+        "Import sequence data for analysis",
+        "Transfer configuration files",
+        "Load reference databases",
+        "Copy scripts or code files"
+      ]
+    },
+    
+    copyFromWorkspace: {
+      description: "Copy a file from container workspace to local filesystem",
+      usage: `
+// Export results from workspace
+await fs.copyFile(
+  "/workspace/output/results.txt",
+  "/home/user/results/analysis.txt"
+);
+
+// Or use relative workspace path
+await fs.copyFile(
+  "output/aligned.fasta",  // → /workspace/output/aligned.fasta
+  "/home/user/data/aligned_output.fasta"
+);
+`,
+      useCases: [
+        "Export analysis results",
+        "Save processed sequences",
+        "Extract generated reports",
+        "Backup important data"
+      ]
+    }
+  },
+  
+  note: `All file operations support both absolute and relative paths.
+Relative paths in workspace are resolved relative to /workspace directory.`
+};
+
+/**
  * Quick Reference Guide
  */
 export const quickStart = `
@@ -327,11 +386,19 @@ QUICK START GUIDE - Common Workflows
    const stats = parseFastaStats(sequences);
    // Returns only statistics, not full sequences
    
-   // Or save to file
+   // Or save to file in workspace
    const metadata = await saveToFile(sequences, 'sequences.fasta');
    // Returns only file metadata
 
-3. EXTRACT METADATA:
+3. COPY FILES TO/FROM WORKSPACE:
+   ──────────────────────────────
+   // Import data from local filesystem
+   await fs.copyFile("/home/user/data.fasta", "input/data.fasta");
+   
+   // Export results to local filesystem
+   await fs.copyFile("output/results.txt", "/home/user/results.txt");
+
+4. EXTRACT METADATA:
    ──────────────────
    const metadata = await database.extractSequenceColumns({
      sequence_data: sequences,
@@ -339,7 +406,7 @@ QUICK START GUIDE - Common Workflows
      output_format: "json"
    });
 
-4. SEARCH FOR GENES (Nuclear Genomes):
+5. SEARCH FOR GENES (Nuclear Genomes):
    ───────────────────────────────────
    const genes = await database.ggetSearch({
      searchwords: ["hemoglobin"],
@@ -379,13 +446,14 @@ Available documentation topics:
   - docs.alignment      : Multiple sequence alignment
   - docs.design         : Primer design
   - docs.validation     : Primer validation
+  - docs.filesystem     : Copy files to/from workspace
   - docs.quickStart     : Quick start guide and common workflows
 
-Usage: docs.database, docs.quickStart, etc.
+Usage: docs.database, docs.filesystem, docs.quickStart, etc.
 `;
   }
   
-  return "Documentation not found. Try: docs.database, docs.processing, etc.";
+  return "Documentation not found. Try: docs.database, docs.processing, docs.filesystem, etc.";
 }
 
 // Export default with all documentation
@@ -395,6 +463,7 @@ export default {
   alignment,
   design,
   validation,
+  filesystem,
   quickStart,
   help
 };

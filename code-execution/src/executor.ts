@@ -262,6 +262,80 @@ async function executeCode(
 }
 
 /**
+ * Copy file to workspace
+ */
+async function copyFileToWorkspace(
+  sourcePath: string,
+  destinationPath: string
+): Promise<{ success: boolean; path?: string; error?: string }> {
+  try {
+    // Ensure source file exists
+    await fs.access(sourcePath);
+    
+    // Resolve destination path relative to workspace
+    const destPath = path.isAbsolute(destinationPath)
+      ? destinationPath
+      : path.join(WORKSPACE_PATH, destinationPath);
+    
+    // Ensure destination directory exists
+    const destDir = path.dirname(destPath);
+    await fs.mkdir(destDir, { recursive: true });
+    
+    // Copy file
+    await fs.copyFile(sourcePath, destPath);
+    
+    return {
+      success: true,
+      path: destPath,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message || String(error),
+    };
+  }
+}
+
+/**
+ * Copy file from workspace
+ */
+async function copyFileFromWorkspace(
+  workspacePath: string,
+  destinationPath: string
+): Promise<{ success: boolean; path?: string; size?: number; error?: string }> {
+  try {
+    // Resolve workspace path
+    const srcPath = path.isAbsolute(workspacePath)
+      ? workspacePath
+      : path.join(WORKSPACE_PATH, workspacePath);
+    
+    // Ensure source file exists
+    await fs.access(srcPath);
+    
+    // Ensure destination directory exists
+    const destDir = path.dirname(destinationPath);
+    await fs.mkdir(destDir, { recursive: true });
+    
+    // Copy file
+    await fs.copyFile(srcPath, destinationPath);
+    
+    // Get file stats
+    const stats = await fs.stat(destinationPath);
+    
+    return {
+      success: true,
+      path: destinationPath,
+      size: stats.size,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message || String(error),
+    };
+  }
+}
+
+/**
  * List available tools
  */
 server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -338,6 +412,71 @@ This approach achieves 99%+ token reduction by:
         required: ['code'],
       },
     },
+    {
+      name: 'copy_file_to_workspace',
+      description: `Copy a file from the local filesystem into the container workspace.
+
+This allows you to transfer files from outside the container into the workspace
+for processing, analysis, or execution. The file will be copied to the specified
+destination path within the workspace.
+
+Use cases:
+- Copy input data files for analysis
+- Transfer configuration files
+- Import sequence data for processing
+- Move scripts or code files into workspace
+
+Example:
+- sourcePath: "/home/user/data/sequences.fasta"
+- destinationPath: "input/sequences.fasta" (relative to workspace)
+  or "/workspace/input/sequences.fasta" (absolute)`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          source_path: {
+            type: 'string',
+            description: 'Absolute path to the source file on local filesystem',
+          },
+          destination_path: {
+            type: 'string',
+            description: 'Destination path in workspace (relative or absolute). If relative, will be resolved relative to /workspace',
+          },
+        },
+        required: ['source_path', 'destination_path'],
+      },
+    },
+    {
+      name: 'copy_file_from_workspace',
+      description: `Copy a file from the container workspace to the local filesystem.
+
+This allows you to extract results, processed data, or generated files from
+the container workspace to your local system for further use or inspection.
+
+Use cases:
+- Export analysis results
+- Save processed sequences
+- Extract generated reports
+- Backup important data
+
+Example:
+- workspacePath: "output/results.txt" (relative to workspace)
+  or "/workspace/output/results.txt" (absolute)
+- destinationPath: "/home/user/results/analysis.txt"`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          workspace_path: {
+            type: 'string',
+            description: 'Path to the file in workspace (relative or absolute). If relative, will be resolved relative to /workspace',
+          },
+          destination_path: {
+            type: 'string',
+            description: 'Absolute path where to copy the file on local filesystem',
+          },
+        },
+        required: ['workspace_path', 'destination_path'],
+      },
+    },
   ];
 
   return { tools };
@@ -375,6 +514,70 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     // Execute code
     const result = await executeCode(code, effectiveTimeout);
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(result, null, 2),
+        },
+      ],
+    };
+  }
+
+  if (name === 'copy_file_to_workspace') {
+    const { source_path, destination_path } = args as {
+      source_path: string;
+      destination_path: string;
+    };
+
+    if (!source_path || !destination_path) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: 'Both source_path and destination_path are required',
+            }),
+          },
+        ],
+      };
+    }
+
+    const result = await copyFileToWorkspace(source_path, destination_path);
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(result, null, 2),
+        },
+      ],
+    };
+  }
+
+  if (name === 'copy_file_from_workspace') {
+    const { workspace_path, destination_path } = args as {
+      workspace_path: string;
+      destination_path: string;
+    };
+
+    if (!workspace_path || !destination_path) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: 'Both workspace_path and destination_path are required',
+            }),
+          },
+        ],
+      };
+    }
+
+    const result = await copyFileFromWorkspace(workspace_path, destination_path);
 
     return {
       content: [
