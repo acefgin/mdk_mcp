@@ -1,8 +1,15 @@
 /**
- * Generate All MCP Server Tools
+ * Generate All MCP Server Tools - MAIN GENERATION SCRIPT
+ * 
+ * This is the primary tool generation script for all 5 MCP servers.
+ * 
+ * Architecture:
+ * - Database tool schemas are imported from generate-database-tools.ts
+ * - Other server schemas are defined inline in this file
+ * - All schemas are processed by ToolFileGenerator to create TypeScript wrappers
  * 
  * Generates TypeScript wrappers for all 5 MCP servers:
- * - Database (11 tools)
+ * - Database (11 tools) - with advanced filtering
  * - Processing (5 tools)
  * - Alignment (5 tools)
  * - Design (6 tools)
@@ -11,7 +18,11 @@
  * Usage:
  * ```bash
  * npx tsx examples/generate-all-tools.ts
+ * # OR via npm script:
+ * npm run generate-tools
  * ```
+ * 
+ * Note: This script is automatically called by `npm run build`
  */
 
 import { ToolFileGenerator, ToolDefinition } from '../mcp_servers/shared/dist/tool-generator.js';

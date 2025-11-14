@@ -1,11 +1,36 @@
 /**
- * Example: Generate Database Server Tools
+ * Database Server Tool Definitions - SCHEMA SOURCE OF TRUTH
  *
- * Demonstrates using ToolFileGenerator to create TypeScript API
- * from Database Server tool definitions.
+ * This file contains the JSON Schema definitions for all 11 database server tools.
+ * These schemas are imported by generate-all-tools.ts and used by ToolFileGenerator
+ * to create type-safe TypeScript client wrappers.
+ *
+ * Architecture:
+ * - This file exports schema definitions only (no generation logic)
+ * - Imported by generate-all-tools.ts (the main generation script)
+ * - Schemas must match the Python server's tool definitions
+ *
+ * Key Feature: Advanced Filtering
+ * ================================
+ * The get_sequences tool includes comprehensive filtering capabilities:
+ * - Length filters (min/max base pairs)
+ * - Completeness (complete/partial genomes)
+ * - Upload date range
+ * - Geographic location
+ * - Quality thresholds
+ * - Exclusions (predicted/environmental sequences)
+ *
+ * Maintenance:
+ * - When updating Python server schemas, update here first
+ * - Then run: npm run generate-tools
+ * - TypeScript wrappers will be regenerated automatically
  *
  * Usage:
  * ```bash
+ * # Import in other scripts:
+ * import { databaseTools } from './generate-database-tools.js';
+ * 
+ * # Or run standalone to generate database tools only:
  * npx tsx examples/generate-database-tools.ts
  * ```
  */
@@ -15,38 +40,95 @@ import { ToolFileGenerator, ToolDefinition } from '../mcp_servers/shared/dist/to
 /**
  * Database Server tool definitions
  *
- * These match the tools defined in:
+ * These schemas match the tools defined in:
  * mcp_servers/database_server/database_mcp_server.py
  */
 const databaseTools: ToolDefinition[] = [
   {
     name: 'get_sequences',
-    description: 'Fetch sequences from multiple databases (NCBI, BOLD, SILVA, UNITE)',
+    description: 'Retrieve sequences from multiple databases with advanced filtering',
     inputSchema: {
       type: 'object',
       properties: {
         taxon: {
           type: 'string',
-          description: 'Taxon name or taxonomic ID',
+          description: 'Taxon name or ID',
         },
         region: {
           type: 'string',
           enum: ['COI', '16S', 'ITS', 'mitogenome', 'whole'],
-          description: 'Genomic region to retrieve',
+          description: 'Target genomic region',
         },
         source: {
           type: 'string',
           enum: ['gget', 'ncbi', 'bold', 'silva', 'unite'],
           description: 'Database source',
+          default: 'gget',
         },
         max_results: {
           type: 'integer',
-          description: 'Maximum number of sequences to return',
+          description: 'Maximum number of results',
+          default: 100,
         },
         format: {
           type: 'string',
           enum: ['fasta', 'genbank'],
           description: 'Output format',
+          default: 'fasta',
+        },
+        filters: {
+          type: 'object',
+          description: 'Advanced filtering options',
+          properties: {
+            min_length: {
+              type: 'integer',
+              description: 'Minimum sequence length in base pairs',
+            },
+            max_length: {
+              type: 'integer',
+              description: 'Maximum sequence length in base pairs',
+            },
+            completeness: {
+              type: 'string',
+              enum: ['complete', 'partial', 'any'],
+              default: 'any',
+              description: 'Sequence completeness level',
+            },
+            upload_date_start: {
+              type: 'string',
+              format: 'date',
+              description: 'Start date for upload/submission (YYYY-MM-DD)',
+            },
+            upload_date_end: {
+              type: 'string',
+              format: 'date',
+              description: 'End date for upload/submission (YYYY-MM-DD)',
+            },
+            country: {
+              type: 'string',
+              description: 'Filter by country/geographic location',
+            },
+            has_geo_location: {
+              type: 'boolean',
+              description: 'Only include sequences with geographic location data',
+            },
+            quality_filter: {
+              type: 'string',
+              enum: ['high', 'medium', 'any'],
+              default: 'any',
+              description: 'Sequence quality threshold',
+            },
+            exclude_predicted: {
+              type: 'boolean',
+              default: false,
+              description: 'Exclude predicted/inferred sequences',
+            },
+            exclude_environmental: {
+              type: 'boolean',
+              default: false,
+              description: 'Exclude environmental/uncultured samples',
+            },
+          },
         },
       },
       required: ['taxon'],

@@ -139,19 +139,31 @@ export class ToolFileGenerator {
     const functionName = this.snakeToCamel(tool.name);
     const typeName = this.capitalize(functionName);
 
+    // Extract nested interfaces (like filters)
+    const nestedInterfaces = this.extractNestedInterfaces(
+      tool.inputSchema,
+      typeName
+    );
+
     // Generate input interface
     const inputInterface = this.generateTypeScriptInterface(
       tool.inputSchema,
-      `${typeName}Input`
+      `${typeName}Input`,
+      true // Use references for nested objects
     );
 
     // Generate output interface if schema provided
     const outputInterface = tool.outputSchema
-      ? this.generateTypeScriptInterface(tool.outputSchema, `${typeName}Output`)
+      ? this.generateTypeScriptInterface(tool.outputSchema, `${typeName}Output`, true)
       : '';
 
     // Determine return type
     const returnType = tool.outputSchema ? `${typeName}Output` : 'any';
+
+    // Combine nested interfaces
+    const nestedInterfacesCode = nestedInterfaces.length > 0
+      ? nestedInterfaces.join('\n\n') + '\n\n'
+      : '';
 
     return `/**
  * ${tool.description}
@@ -162,7 +174,7 @@ export class ToolFileGenerator {
  */
 import { callMCPTool } from "../../lib/mcp-client.js";
 
-${inputInterface}
+${nestedInterfacesCode}${inputInterface}
 
 ${outputInterface}
 
@@ -328,13 +340,64 @@ console.log(result);
   }
 
   /**
+   * Extract nested object interfaces from schema
+   *
+   * @param schema - JSON schema object
+   * @param parentName - Parent type name for naming nested interfaces
+   * @returns Array of interface definitions
+   */
+  private extractNestedInterfaces(schema: any, parentName: string): string[] {
+    const interfaces: string[] = [];
+
+    if (!schema || schema.type !== "object" || !schema.properties) {
+      return interfaces;
+    }
+
+    // Look for nested objects with properties
+    for (const [key, prop] of Object.entries(schema.properties) as [string, any][]) {
+      if (prop.type === "object" && prop.properties) {
+        // Remove 'Input' or 'Output' suffix from parent name before adding key
+        const cleanParentName = parentName.replace(/(Input|Output)$/, '');
+        const nestedName = `${cleanParentName}${this.capitalize(key)}`;
+        
+        // Generate interface for nested object with detailed comments
+        const properties = Object.entries(prop.properties)
+          .map(([nestedKey, nestedProp]: [string, any]) => {
+            const optional = !prop.required?.includes(nestedKey) ? "?" : "";
+            const type = this.schemaTypeToTS(nestedProp, false); // Don't create more nested interfaces
+            const comment = nestedProp.description 
+              ? `  /** ${nestedProp.description} */\n` 
+              : "";
+            return `${comment}  ${nestedKey}${optional}: ${type};`;
+          })
+          .join("\n");
+
+        const interfaceComment = prop.description
+          ? `/**\n * ${prop.description}\n */\n`
+          : "";
+
+        interfaces.push(`${interfaceComment}export interface ${nestedName} {
+${properties}
+}`);
+      }
+    }
+
+    return interfaces;
+  }
+
+  /**
    * Generate TypeScript interface from JSON schema
    *
    * @param schema - JSON schema object
    * @param name - Interface name
+   * @param useReferences - Whether to use type references for nested objects
    * @returns TypeScript interface definition
    */
-  private generateTypeScriptInterface(schema: any, name: string): string {
+  private generateTypeScriptInterface(
+    schema: any, 
+    name: string,
+    useReferences: boolean = false
+  ): string {
     if (!schema || schema.type !== "object") {
       return `export type ${name} = any;`;
     }
@@ -342,7 +405,7 @@ console.log(result);
     const properties = Object.entries(schema.properties || {})
       .map(([key, prop]: [string, any]) => {
         const optional = !schema.required?.includes(key) ? "?" : "";
-        const type = this.schemaTypeToTS(prop);
+        const type = this.schemaTypeToTS(prop, useReferences, name, key);
         const comment = prop.description ? `  /** ${prop.description} */\n` : "";
         return `${comment}  ${key}${optional}: ${type};`;
       })
@@ -357,9 +420,17 @@ ${properties}
    * Convert JSON schema type to TypeScript type
    *
    * @param prop - JSON schema property
+   * @param useReferences - Whether to use type references for nested objects
+   * @param parentName - Parent type name for naming nested types
+   * @param propKey - Property key for generating nested type names
    * @returns TypeScript type string
    */
-  private schemaTypeToTS(prop: any): string {
+  private schemaTypeToTS(
+    prop: any,
+    useReferences: boolean = false,
+    parentName?: string,
+    propKey?: string
+  ): string {
     // Handle enum types
     if (prop.enum) {
       return prop.enum.map((e: any) => `"${e}"`).join(" | ");
@@ -367,18 +438,31 @@ ${properties}
 
     // Handle array types
     if (prop.type === "array") {
-      const itemType = prop.items ? this.schemaTypeToTS(prop.items) : "any";
+      const itemType = prop.items 
+        ? this.schemaTypeToTS(prop.items, useReferences, parentName, propKey) 
+        : "any";
       return `${itemType}[]`;
     }
 
     // Handle object types
     if (prop.type === "object") {
       if (prop.properties) {
-        // Inline interface for nested objects
+        // If useReferences is true and we have naming context, use a type reference
+        if (useReferences && parentName && propKey) {
+          // Remove 'Input' or 'Output' suffix from parent name before adding key
+          const cleanParentName = parentName.replace(/(Input|Output)$/, '');
+          return `${cleanParentName}${this.capitalize(propKey)}`;
+        }
+        
+        // Otherwise, inline interface for nested objects
         const props = Object.entries(prop.properties)
           .map(([k, v]: [string, any]) => {
             const optional = !prop.required?.includes(k) ? "?" : "";
-            return `${k}${optional}: ${this.schemaTypeToTS(v)}`;
+            const type = this.schemaTypeToTS(v, false); // Don't nest references further
+            const comment = (v as any).description 
+              ? `/** ${(v as any).description} */ ` 
+              : "";
+            return `${comment}${k}${optional}: ${type}`;
           })
           .join("; ");
         return `{ ${props} }`;
