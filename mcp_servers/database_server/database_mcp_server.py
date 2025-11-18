@@ -64,7 +64,7 @@ async def handle_list_tools() -> List[types.Tool]:
         # Core sequence retrieval
         types.Tool(
             name="get_sequences",
-            description="Retrieve sequences from multiple databases",
+            description="Retrieve sequences from multiple databases with advanced filtering",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -85,6 +85,40 @@ async def handle_list_tools() -> List[types.Tool]:
                         "type": "string",
                         "enum": ["fasta", "genbank"],
                         "default": "fasta"
+                    },
+                    "filters": {
+                        "type": "object",
+                        "description": "Advanced filtering options",
+                        "properties": {
+                            "min_length": {"type": "integer", "description": "Minimum sequence length in bp"},
+                            "max_length": {"type": "integer", "description": "Maximum sequence length in bp"},
+                            "completeness": {
+                                "type": "string",
+                                "enum": ["complete", "partial", "any"],
+                                "default": "any",
+                                "description": "Sequence completeness (complete genome/gene, partial, or any)"
+                            },
+                            "upload_date_start": {
+                                "type": "string",
+                                "format": "date",
+                                "description": "Start date for upload/submission (YYYY-MM-DD or YYYY/MM/DD)"
+                            },
+                            "upload_date_end": {
+                                "type": "string",
+                                "format": "date",
+                                "description": "End date for upload/submission (YYYY-MM-DD or YYYY/MM/DD)"
+                            },
+                            "country": {"type": "string", "description": "Filter by country/geographic location"},
+                            "has_geo_location": {"type": "boolean", "description": "Only include sequences with geographic location data"},
+                            "quality_filter": {
+                                "type": "string",
+                                "enum": ["high", "medium", "any"],
+                                "default": "any",
+                                "description": "Sequence quality threshold (RefSeq, reviewed, or any)"
+                            },
+                            "exclude_predicted": {"type": "boolean", "default": False, "description": "Exclude predicted/inferred sequences"},
+                            "exclude_environmental": {"type": "boolean", "default": False, "description": "Exclude environmental/uncultured samples"}
+                        }
                     }
                 },
                 "required": ["taxon"]
@@ -355,11 +389,13 @@ async def get_sequences(
     region: str = "COI",
     source: str = "gget",
     max_results: int = 100,
-    format: str = "fasta"
+    format: str = "fasta",
+    filters: Optional[Dict[str, Any]] = None
 ) -> str:
-    """Unified sequence retrieval from multiple sources."""
+    """Unified sequence retrieval from multiple sources with advanced filtering."""
     
     max_results = min(max_results, Config.MAX_RESULTS_LIMIT)
+    filters = filters or {}
     
     try:
         if source == "gget":
@@ -378,14 +414,18 @@ async def get_sequences(
             
             result = format_sequences(sequences, format)
             
+            # Apply post-retrieval filters
+            if filters:
+                result = apply_post_retrieval_filters(result, filters, format)
+            
         elif source == "ncbi":
-            result = await get_ncbi_sequences(taxon, region, max_results, format)
+            result = await get_ncbi_sequences(taxon, region, max_results, format, filters)
         elif source == "bold":
-            result = await get_bold_sequences(taxon, region, max_results, format)
+            result = await get_bold_sequences(taxon, region, max_results, format, filters)
         elif source == "silva":
-            result = await get_silva_sequences(taxon, region, max_results, format)
+            result = await get_silva_sequences(taxon, region, max_results, format, filters)
         elif source == "unite":
-            result = await get_unite_sequences(taxon, region, max_results, format)
+            result = await get_unite_sequences(taxon, region, max_results, format, filters)
         else:
             raise ValueError(f"Unsupported source: {source}")
         
@@ -595,10 +635,13 @@ async def get_ncbi_sequences(
     taxon: str,
     region: str,
     max_results: int,
-    format: str
+    format: str,
+    filters: Optional[Dict[str, Any]] = None
 ) -> str:
-    """Get sequences from NCBI."""
+    """Get sequences from NCBI with advanced filtering."""
     try:
+        filters = filters or {}
+        
         # Build search query based on region
         region_terms = {
             "COI": "COI OR cytochrome oxidase I OR COX1",
@@ -610,40 +653,58 @@ async def get_ncbi_sequences(
         
         search_term = f'"{taxon}"[Organism] AND ({region_terms.get(region, region)})'
         
+        # Apply advanced filters to NCBI query
+        search_term = build_ncbi_filtered_query(search_term, filters)
+        
+        logger.info(f"NCBI search query: {search_term}")
+        
+        # For filtered queries, request more results initially to account for post-filtering
+        initial_max = max_results * 2 if filters else max_results
+        initial_max = min(initial_max, Config.MAX_RESULTS_LIMIT)
+        
         search_handle = Entrez.esearch(
             db="nucleotide",
             term=search_term,
-            retmax=max_results
+            retmax=initial_max,
+            usehistory="y"  # Use history for large result sets
         )
         search_results = Entrez.read(search_handle)
         search_handle.close()
         
         if not search_results["IdList"]:
-            return f"No sequences found for {taxon} {region} in NCBI"
+            return f"No sequences found for {taxon} {region} in NCBI with applied filters"
         
         # Fetch sequences
         fetch_handle = Entrez.efetch(
             db="nucleotide",
-            id=search_results["IdList"],
+            id=search_results["IdList"][:max_results],
             rettype="fasta" if format == "fasta" else "gb",
             retmode="text"
         )
         sequences = fetch_handle.read()
         fetch_handle.close()
         
+        # Apply post-retrieval filters for fields not supported by NCBI query
+        if filters and (filters.get("min_length") or filters.get("max_length")):
+            sequences = apply_post_retrieval_filters(sequences, filters, format)
+        
         return sequences
         
     except Exception as e:
+        logger.error(f"Error retrieving NCBI sequences: {str(e)}")
         return f"Error retrieving NCBI sequences: {str(e)}"
 
 async def get_bold_sequences(
     taxon: str,
     region: str,
     max_results: int,
-    format: str
+    format: str,
+    filters: Optional[Dict[str, Any]] = None
 ) -> str:
-    """Get sequences from BOLD Systems."""
+    """Get sequences from BOLD Systems with filtering."""
     try:
+        filters = filters or {}
+        
         # BOLD API call
         url = f"{Config.BOLD_BASE_URL}/sequence"
         params = {
@@ -652,24 +713,36 @@ async def get_bold_sequences(
             "format": "fasta"
         }
         
+        # Add BOLD-specific filters if supported
+        if filters.get("country"):
+            params["geo"] = filters["country"]
+        
         response = requests.get(url, params=params, timeout=30)
         response.raise_for_status()
         
-        return response.text
+        result = response.text
+        
+        # Apply post-retrieval filters
+        if filters:
+            result = apply_post_retrieval_filters(result, filters, format)
+        
+        return result
         
     except Exception as e:
+        logger.error(f"Error retrieving BOLD sequences: {str(e)}")
         return f"Error retrieving BOLD sequences: {str(e)}"
 
 async def get_silva_sequences(
     taxon: str,
     region: str,
     max_results: int,
-    format: str
+    format: str,
+    filters: Optional[Dict[str, Any]] = None
 ) -> str:
-    """Get sequences from SILVA database."""
+    """Get sequences from SILVA database with filtering."""
     try:
         # This is a placeholder - actual SILVA API integration would be more complex
-        return f"SILVA integration for {taxon} {region} not yet fully implemented"
+        return f"SILVA integration for {taxon} {region} not yet fully implemented. Filters: {filters}"
         
     except Exception as e:
         return f"Error retrieving SILVA sequences: {str(e)}"
@@ -678,15 +751,260 @@ async def get_unite_sequences(
     taxon: str,
     region: str,
     max_results: int,
-    format: str
+    format: str,
+    filters: Optional[Dict[str, Any]] = None
 ) -> str:
-    """Get sequences from UNITE database."""
+    """Get sequences from UNITE database with filtering."""
     try:
         # This is a placeholder - actual UNITE API integration would be more complex
-        return f"UNITE integration for {taxon} {region} not yet fully implemented"
+        return f"UNITE integration for {taxon} {region} not yet fully implemented. Filters: {filters}"
         
     except Exception as e:
         return f"Error retrieving UNITE sequences: {str(e)}"
+
+def build_ncbi_filtered_query(base_query: str, filters: Dict[str, Any]) -> str:
+    """Build NCBI Entrez query with advanced filters."""
+    query_parts = [base_query]
+    
+    # Length filters (NCBI supports sequence length filtering)
+    if filters.get("min_length"):
+        query_parts.append(f"{filters['min_length']}:999999999[Sequence Length]")
+    if filters.get("max_length"):
+        min_len = filters.get("min_length", 0)
+        query_parts.append(f"{min_len}:{filters['max_length']}[Sequence Length]")
+    
+    # Completeness filter
+    if filters.get("completeness") == "complete":
+        query_parts.append('("complete genome"[Title] OR "complete sequence"[Title] OR "complete cds"[Title])')
+    elif filters.get("completeness") == "partial":
+        query_parts.append('("partial"[Title] OR "partial sequence"[Title])')
+    
+    # Date filters
+    if filters.get("upload_date_start") or filters.get("upload_date_end"):
+        start_date = filters.get("upload_date_start", "1900/01/01").replace("-", "/")
+        end_date = filters.get("upload_date_end", "3000/12/31").replace("-", "/")
+        query_parts.append(f'"{start_date}"[Publication Date] : "{end_date}"[Publication Date]')
+    
+    # Country/geographic location filter
+    if filters.get("country"):
+        query_parts.append(f'"{filters["country"]}"[Country]')
+    
+    # Quality filter
+    if filters.get("quality_filter") == "high":
+        query_parts.append('(refseq[Filter] OR biomol_mrna[Properties])')
+    elif filters.get("quality_filter") == "medium":
+        query_parts.append('NOT (predicted[Title] OR unverified[Title])')
+    
+    # Exclude predicted sequences
+    if filters.get("exclude_predicted"):
+        query_parts.append('NOT (predicted[Title] OR "model"[Title])')
+    
+    # Exclude environmental samples
+    if filters.get("exclude_environmental"):
+        query_parts.append('NOT (environmental[Title] OR uncultured[Title] OR "environmental sample"[Organism])')
+    
+    # Geographic location requirement
+    if filters.get("has_geo_location"):
+        query_parts.append('has_geo[Properties]')
+    
+    final_query = " AND ".join(f"({part})" for part in query_parts)
+    return final_query
+
+
+def apply_post_retrieval_filters(sequences: str, filters: Dict[str, Any], format: str) -> str:
+    """Apply filters to sequences after retrieval (for filters not supported by source API)."""
+    try:
+        if not sequences or not filters:
+            return sequences
+        
+        # Parse sequences
+        if format == "fasta" or sequences.startswith(">"):
+            filtered = filter_fasta_sequences(sequences, filters)
+        elif format == "genbank" or "LOCUS" in sequences:
+            filtered = filter_genbank_sequences(sequences, filters)
+        else:
+            # Unknown format, return as-is
+            return sequences
+        
+        return filtered
+        
+    except Exception as e:
+        logger.error(f"Error applying post-retrieval filters: {str(e)}")
+        # Return original sequences if filtering fails
+        return sequences
+
+
+def filter_fasta_sequences(fasta_text: str, filters: Dict[str, Any]) -> str:
+    """Filter FASTA sequences based on criteria."""
+    filtered_records = []
+    current_header = ""
+    current_seq = []
+    
+    for line in fasta_text.split("\n"):
+        line = line.strip()
+        if line.startswith(">"):
+            # Process previous record
+            if current_header:
+                seq_string = "".join(current_seq)
+                if sequence_passes_filters(current_header, seq_string, filters):
+                    filtered_records.append(f"{current_header}\n{seq_string}")
+            
+            # Start new record
+            current_header = line
+            current_seq = []
+        elif line:
+            current_seq.append(line)
+    
+    # Process last record
+    if current_header:
+        seq_string = "".join(current_seq)
+        if sequence_passes_filters(current_header, seq_string, filters):
+            filtered_records.append(f"{current_header}\n{seq_string}")
+    
+    if not filtered_records:
+        return "No sequences matched the filter criteria"
+    
+    return "\n".join(filtered_records)
+
+
+def filter_genbank_sequences(genbank_text: str, filters: Dict[str, Any]) -> str:
+    """Filter GenBank sequences based on criteria."""
+    # Split by LOCUS to get individual records
+    records = genbank_text.split("\nLOCUS")[1:]  # Skip empty first element
+    filtered_records = []
+    
+    for record in records:
+        record = "LOCUS" + record  # Add back the LOCUS keyword
+        
+        # Extract metadata for filtering
+        header_info = extract_genbank_metadata(record)
+        
+        if genbank_record_passes_filters(header_info, record, filters):
+            filtered_records.append(record)
+    
+    if not filtered_records:
+        return "No sequences matched the filter criteria"
+    
+    return "\n".join(filtered_records)
+
+
+def extract_genbank_metadata(record: str) -> Dict[str, Any]:
+    """Extract metadata from GenBank record for filtering."""
+    metadata = {}
+    
+    lines = record.split("\n")
+    for line in lines:
+        if line.startswith("LOCUS"):
+            parts = line.split()
+            if len(parts) > 2:
+                try:
+                    metadata["length"] = int(parts[2])
+                except (ValueError, IndexError):
+                    pass
+        elif line.startswith("DEFINITION"):
+            metadata["title"] = line[10:].strip()
+        elif line.startswith("SOURCE"):
+            metadata["source"] = line[10:].strip()
+        elif "collection_date=" in line:
+            date_str = line.split("collection_date=")[1].strip().strip('"')
+            metadata["collection_date"] = date_str
+        elif "/country=" in line or "geo_loc_name=" in line:
+            if "/country=" in line:
+                country = line.split("/country=")[1].strip().strip('"')
+            else:
+                country = line.split("geo_loc_name=")[1].strip().strip('"').split(":")[0]
+            metadata["country"] = country
+    
+    return metadata
+
+
+def sequence_passes_filters(header: str, sequence: str, filters: Dict[str, Any]) -> bool:
+    """Check if a FASTA sequence passes the filter criteria."""
+    header_lower = header.lower()
+    
+    # Length filters
+    seq_length = len(sequence)
+    if filters.get("min_length") and seq_length < filters["min_length"]:
+        return False
+    if filters.get("max_length") and seq_length > filters["max_length"]:
+        return False
+    
+    # Completeness filter
+    if filters.get("completeness") == "complete":
+        if not any(term in header_lower for term in ["complete", "whole"]):
+            return False
+    elif filters.get("completeness") == "partial":
+        if "partial" not in header_lower:
+            return False
+    
+    # Country filter
+    if filters.get("country"):
+        country_lower = filters["country"].lower()
+        if country_lower not in header_lower:
+            return False
+    
+    # Exclude predicted
+    if filters.get("exclude_predicted"):
+        if any(term in header_lower for term in ["predicted", "model", "hypothetical"]):
+            return False
+    
+    # Exclude environmental
+    if filters.get("exclude_environmental"):
+        if any(term in header_lower for term in ["environmental", "uncultured", "unidentified"]):
+            return False
+    
+    return True
+
+
+def genbank_record_passes_filters(metadata: Dict[str, Any], record: str, filters: Dict[str, Any]) -> bool:
+    """Check if a GenBank record passes the filter criteria."""
+    record_lower = record.lower()
+    
+    # Length filters
+    if metadata.get("length"):
+        if filters.get("min_length") and metadata["length"] < filters["min_length"]:
+            return False
+        if filters.get("max_length") and metadata["length"] > filters["max_length"]:
+            return False
+    
+    # Completeness filter
+    title = metadata.get("title", "").lower()
+    if filters.get("completeness") == "complete":
+        if not any(term in title for term in ["complete", "whole"]):
+            return False
+    elif filters.get("completeness") == "partial":
+        if "partial" not in title:
+            return False
+    
+    # Country filter
+    if filters.get("country"):
+        country_lower = filters["country"].lower()
+        metadata_country = metadata.get("country", "").lower()
+        if country_lower not in metadata_country and country_lower not in record_lower:
+            return False
+    
+    # Date filters (if collection_date is available)
+    if filters.get("upload_date_start") or filters.get("upload_date_end"):
+        # Date filtering is complex and best done at query time for GenBank
+        pass
+    
+    # Geographic location requirement
+    if filters.get("has_geo_location"):
+        if not metadata.get("country") and "geo_loc_name" not in record_lower:
+            return False
+    
+    # Exclude predicted
+    if filters.get("exclude_predicted"):
+        if any(term in record_lower for term in ["predicted", "model", "hypothetical"]):
+            return False
+    
+    # Exclude environmental
+    if filters.get("exclude_environmental"):
+        if any(term in record_lower for term in ["environmental", "uncultured", "environmental sample"]):
+            return False
+    
+    return True
+
 
 def format_sequences(sequences: Any, format: str) -> str:
     """Format sequences for output."""

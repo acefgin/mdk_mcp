@@ -30,8 +30,14 @@ workspace/lib/**/*.d.ts
 workspace/lib/**/*.d.ts.map
 
 # Generated tool wrappers - IGNORE (auto-generated, not source)
-workspace/servers/
+workspace/servers/*
 !workspace/servers/.gitkeep
+
+# EXCEPT: Manual type definitions and documentation (these are source files)
+!workspace/servers/database/
+workspace/servers/database/*
+!workspace/servers/database/types.ts
+!workspace/servers/database/TYPESCRIPT_UPDATES.md
 
 # Code execution - ignore compiled output
 code-execution/dist/

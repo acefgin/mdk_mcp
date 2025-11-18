@@ -16,11 +16,11 @@ export const database = {
   
   functions: {
     getSequences: {
-      description: "Fetch sequences from multiple databases",
+      description: "Fetch sequences from multiple databases with advanced filtering",
       usage: `
 // IMPORTANT: Choose the right source for your target region!
 
-// For MITOCHONDRIAL genes (COI, 16S mtDNA, etc.) - Use NCBI or BOLD:
+// BASIC USAGE - For MITOCHONDRIAL genes (COI, 16S mtDNA, etc.):
 const coiSeqs = await database.getSequences({
   taxon: "Salmo salar",
   region: "COI",                    // COI, 16S, ITS, mitogenome
@@ -29,12 +29,46 @@ const coiSeqs = await database.getSequences({
   format: "fasta"                   // or "genbank"
 });
 
-// For COI BARCODING specifically - Use BOLD (specialized database):
-const barcode = await database.getSequences({
+// ADVANCED FILTERING - Filter complete mitochondrial genomes:
+const completeGenomes = await database.getSequences({
+  taxon: "Salmo salar",
+  region: "mitogenome",
+  source: "ncbi",
+  format: "fasta",
+  filters: {
+    min_length: 15000,              // ← Filter by sequence length (bp)
+    max_length: 18000,
+    completeness: "complete",       // ← "complete", "partial", or "any"
+    quality_filter: "high"          // ← "high", "medium", or "any"
+  }
+});
+
+// ADVANCED FILTERING - Filter by date and location:
+const recentSequences = await database.getSequences({
+  taxon: "Salmo salar",
+  region: "COI",
+  source: "ncbi",
+  filters: {
+    upload_date_start: "2020-01-01",  // ← Filter by upload date (YYYY-MM-DD)
+    upload_date_end: "2024-12-31",
+    country: "Norway",                // ← Filter by country
+    has_geo_location: true,           // ← Only sequences with GPS coordinates
+    exclude_environmental: true       // ← Exclude uncultured/environmental samples
+  }
+});
+
+// ADVANCED FILTERING - High-quality COI barcodes:
+const qualityBarcodes = await database.getSequences({
   taxon: "Salmo salar",
   region: "COI",
   source: "bold",                   // ← BOLD specializes in COI barcodes
-  max_results: 100
+  filters: {
+    min_length: 600,                // Typical barcode length
+    max_length: 700,
+    quality_filter: "high",
+    exclude_predicted: true,        // ← Exclude computationally predicted sequences
+    exclude_environmental: true
+  }
 });
 
 // For NUCLEAR genes - Use Ensembl (default "gget"):
@@ -66,15 +100,73 @@ const its = await database.getSequences({
         region: "Target region: 'COI', '16S', 'ITS', 'mitogenome', 'whole'",
         source: "Database: 'ncbi' (default), 'bold', 'gget' (Ensembl), 'silva', 'unite'",
         max_results: "Number of sequences (default: 100)",
-        format: "'fasta' (default) or 'genbank'"
+        format: "'fasta' (default) or 'genbank'",
+        filters: "Optional: Advanced filtering options (see filterOptions below)"
+      },
+      filterOptions: {
+        min_length: "Minimum sequence length in base pairs (number)",
+        max_length: "Maximum sequence length in base pairs (number)",
+        completeness: "'complete', 'partial', or 'any' - Sequence completeness level",
+        upload_date_start: "Start date for upload/submission (YYYY-MM-DD)",
+        upload_date_end: "End date for upload/submission (YYYY-MM-DD)",
+        country: "Filter by country/geographic location (string)",
+        has_geo_location: "Only include sequences with GPS coordinates (boolean)",
+        quality_filter: "'high', 'medium', or 'any' - Sequence quality threshold",
+        exclude_predicted: "Exclude predicted/inferred sequences (boolean)",
+        exclude_environmental: "Exclude environmental/uncultured samples (boolean)"
+      },
+      filterSupport: {
+        ncbi: "✓ All filters supported (server-side filtering)",
+        bold: "⚠ Length, date filters (post-retrieval filtering)",
+        gget: "⚠ Limited filter support",
+        silva: "⚠ Length filters only (post-retrieval)",
+        unite: "⚠ Length filters only (post-retrieval)"
       },
       returns: "FASTA or GenBank format sequences as string",
       sourceGuide: {
-        "ncbi": "✓ Mitochondrial genes (COI, 16S mtDNA), all sequences",
-        "bold": "✓ COI barcoding sequences (specialized)",
+        "ncbi": "✓ Mitochondrial genes (COI, 16S mtDNA), all sequences, best filter support",
+        "bold": "✓ COI barcoding sequences (specialized), partial filter support",
         "gget": "✓ Nuclear genes, reference genomes (Ensembl)",
-        "silva": "✓ 16S/18S rRNA (bacterial/archaeal)",
-        "unite": "✓ ITS (fungal sequences)"
+        "silva": "✓ 16S/18S rRNA (bacterial/archaeal), basic filters",
+        "unite": "✓ ITS (fungal sequences), basic filters"
+      },
+      examples: {
+        completeGenomes: {
+          description: "Get only complete mitochondrial genomes",
+          code: `await database.getSequences({
+  taxon: "Salmo salar",
+  region: "mitogenome",
+  source: "ncbi",
+  filters: { min_length: 15000, completeness: "complete" }
+})`
+        },
+        highQualityCOI: {
+          description: "Get high-quality COI barcodes from recent submissions",
+          code: `await database.getSequences({
+  taxon: "Salmo salar",
+  region: "COI",
+  source: "bold",
+  filters: {
+    min_length: 600,
+    max_length: 700,
+    quality_filter: "high",
+    upload_date_start: "2020-01-01",
+    exclude_environmental: true
+  }
+})`
+        },
+        geographicFilter: {
+          description: "Get sequences from specific country with coordinates",
+          code: `await database.getSequences({
+  taxon: "Salmo salar",
+  region: "COI",
+  source: "ncbi",
+  filters: {
+    country: "Norway",
+    has_geo_location: true
+  }
+})`
+        }
       }
     },
     
@@ -380,7 +472,47 @@ QUICK START GUIDE - Common Workflows
      max_results: 100
    });
 
-2. PROCESS DATA EFFICIENTLY (avoid large context):
+2. ADVANCED FILTERING (NEW!) - Filter at Database Level:
+   ─────────────────────────────────────────────────────
+   // Get only complete mitochondrial genomes (15-18kb)
+   const completeGenomes = await database.getSequences({
+     taxon: "Salmo salar",
+     region: "mitogenome",
+     source: "ncbi",
+     filters: {
+       min_length: 15000,           // ← Filter by length
+       max_length: 18000,
+       completeness: "complete",    // ← Complete genomes only
+       quality_filter: "high"       // ← High quality only
+     }
+   });
+   
+   // Get high-quality COI barcodes from recent years
+   const recentBarcodes = await database.getSequences({
+     taxon: "Salmo salar",
+     region: "COI",
+     source: "bold",
+     filters: {
+       min_length: 600,
+       max_length: 700,
+       upload_date_start: "2020-01-01",
+       quality_filter: "high",
+       exclude_environmental: true
+     }
+   });
+   
+   // Filter by geographic location
+   const norwegianSeqs = await database.getSequences({
+     taxon: "Salmo salar",
+     region: "COI",
+     source: "ncbi",
+     filters: {
+       country: "Norway",
+       has_geo_location: true
+     }
+   });
+
+3. PROCESS DATA EFFICIENTLY (avoid large context):
    ────────────────────────────────────────────────
    // Use helpers to keep data out of context
    const stats = parseFastaStats(sequences);
@@ -390,7 +522,7 @@ QUICK START GUIDE - Common Workflows
    const metadata = await saveToFile(sequences, 'sequences.fasta');
    // Returns only file metadata
 
-3. COPY FILES TO/FROM WORKSPACE:
+4. COPY FILES TO/FROM WORKSPACE:
    ──────────────────────────────
    // Import data from local filesystem
    await fs.copyFile("/home/user/data.fasta", "input/data.fasta");
@@ -398,7 +530,7 @@ QUICK START GUIDE - Common Workflows
    // Export results to local filesystem
    await fs.copyFile("output/results.txt", "/home/user/results.txt");
 
-4. EXTRACT METADATA:
+5. EXTRACT METADATA:
    ──────────────────
    const metadata = await database.extractSequenceColumns({
      sequence_data: sequences,
@@ -406,7 +538,7 @@ QUICK START GUIDE - Common Workflows
      output_format: "json"
    });
 
-5. SEARCH FOR GENES (Nuclear Genomes):
+6. SEARCH FOR GENES (Nuclear Genomes):
    ───────────────────────────────────
    const genes = await database.ggetSearch({
      searchwords: ["hemoglobin"],
@@ -415,16 +547,33 @@ QUICK START GUIDE - Common Workflows
 
 DATABASE SOURCE SELECTION:
 ═════════════════════════
-┌─────────────────┬───────────────────────────┐
-│ For...          │ Use source...             │
-├─────────────────┼───────────────────────────┤
-│ COI (mtDNA)     │ "ncbi" or "bold"         │
-│ 16S mtDNA       │ "ncbi"                    │
-│ ITS (fungi)     │ "unite"                   │
-│ 16S rRNA (bact) │ "silva"                   │
-│ Nuclear genes   │ "gget" (Ensembl)         │
-│ Mitogenomes     │ "ncbi"                    │
-└─────────────────┴───────────────────────────┘
+┌─────────────────┬───────────────────────────┬──────────────────────┐
+│ For...          │ Use source...             │ Filter Support       │
+├─────────────────┼───────────────────────────┼──────────────────────┤
+│ COI (mtDNA)     │ "ncbi" or "bold"         │ ✓ All filters (ncbi) │
+│ 16S mtDNA       │ "ncbi"                    │ ✓ All filters        │
+│ ITS (fungi)     │ "unite"                   │ ⚠ Basic filters      │
+│ 16S rRNA (bact) │ "silva"                   │ ⚠ Basic filters      │
+│ Nuclear genes   │ "gget" (Ensembl)         │ ⚠ Limited            │
+│ Mitogenomes     │ "ncbi"                    │ ✓ All filters        │
+└─────────────────┴───────────────────────────┴──────────────────────┘
+
+ADVANCED FILTER OPTIONS:
+═══════════════════════
+┌───────────────────────┬─────────────────────────────────────────┐
+│ Filter                │ Description                             │
+├───────────────────────┼─────────────────────────────────────────┤
+│ min_length            │ Minimum sequence length (bp)            │
+│ max_length            │ Maximum sequence length (bp)            │
+│ completeness          │ "complete", "partial", or "any"         │
+│ upload_date_start     │ Start date (YYYY-MM-DD)                 │
+│ upload_date_end       │ End date (YYYY-MM-DD)                   │
+│ country               │ Filter by country name                  │
+│ has_geo_location      │ Require GPS coordinates (boolean)       │
+│ quality_filter        │ "high", "medium", or "any"              │
+│ exclude_predicted     │ Exclude predicted sequences (boolean)   │
+│ exclude_environmental │ Exclude environmental samples (boolean) │
+└───────────────────────┴─────────────────────────────────────────┘
 
 HELPER FUNCTIONS (for context efficiency):
 ═════════════════════════════════════════
